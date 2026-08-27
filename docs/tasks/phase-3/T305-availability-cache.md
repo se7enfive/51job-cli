@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 3 — 质量门禁与可靠性加固 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无 |
 | 验证 | 自动 + 弱网实机 🧪 |
 
@@ -32,6 +32,16 @@
 - [ ] 模拟基线不一致（临时改本地 GUARDED_SCRIPT_HASHES 中的一个哈希）→ 仍禁用、缓存 6h、消息清晰不重复包装
 - [ ] 弱网模拟下校验总耗时 ≤ 30s
 - [ ] 正常网络下校验结果与缓存命中行为不变
+
+## 实施记录（2026-08-27）
+
+- **失败分类**：`JobAvailabilityError` 携带结构化 `reasons`（两处抛出点传入），仅基线不一致写 6h 禁用缓存；网络类/超时异常 → warn 放行 + 短 TTL（2 分钟）`pending` 标记缓存，不再「一次断网哑 6h」。
+- **双重包装消除**：缓存存原始 reasons，读取时才 `formatDisabledMessage`。
+- **总超时预算**：`Promise.race` 整体 30s（`51JOB_AVAILABILITY_TIMEOUT_MS` 可配），timer 已 unref。
+- **派生发现并修复**：`ensureBrowser` spawn 的 Chrome 子进程以 ref 状态持有 CLI 事件循环——命令完成后进程挂起不退出（无超时预算问题时也存在，此前被 fail 的 process.exit 掩盖）。加 `child.unref()` 修复：CLI 自然退出，Chrome 继续常驻。
+- **实测验证**：`51JOB_AVAILABILITY_TIMEOUT_MS=1` 模拟故障 → warn 放行 + exit 0 + 进程正常退出；pending 缓存 `{ok:false, pending:true}` 写入；2 分钟内第二命令 1ms 快速跳过。
+- 派生发现已记录：可用性校验超时后其内部 fetch 仍在后台跑到各自 45s 超时——只影响进程尾部滞留（有界），不影响命令执行，接受。
+- 真实断网（关代理/飞行模式）复测归实机批次。
 
 ## 注意事项
 

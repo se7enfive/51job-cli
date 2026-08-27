@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readJson, writeJson, cacheDir } from '../utils/store';
 import { join } from 'node:path';
+import { warn } from '../utils/output';
 
 /**
  * 51job 线上前端可用性校验（boss_availability 对应移植）。
@@ -86,7 +87,11 @@ const GUARDED_SCRIPT_HASHES = [
 const MIN_GAEA_CHUNKS = 8;
 
 export class JobAvailabilityError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** 结构化原因列表：缓存存这个，读取时才格式化（T305：避免消息双重包装） */
+    public readonly reasons: string[] = [],
+  ) {
     super(message);
     this.name = 'JobAvailabilityError';
   }
@@ -246,7 +251,7 @@ async function assertOnlineFrontendMatchesBaseline(): Promise<void> {
   const currentAssetUrls = [...entryPage.assetUrls, ...loginPage.assetUrls];
 
   if (reasons.length > 0) {
-    throw new JobAvailabilityError(formatDisabledMessage(reasons));
+    throw new JobAvailabilityError(formatDisabledMessage(reasons), [...reasons]);
   }
 
   for (const guarded of GUARDED_SCRIPT_HASHES) {
@@ -275,15 +280,27 @@ async function assertOnlineFrontendMatchesBaseline(): Promise<void> {
   }
 
   if (reasons.length > 0) {
-    throw new JobAvailabilityError(formatDisabledMessage(reasons));
+    throw new JobAvailabilityError(formatDisabledMessage(reasons), [...reasons]);
   }
 }
 
 type AvailabilityCache = {
   checkedAtMs: number;
   ok: boolean;
+  /** 基线不一致的原始原因（读取时才 formatDisabledMessage，T305：避免双重包装） */
   reasons?: string[];
+  /** 校验未完成（网络类失败）标记：短 TTL 内跳过重试，但不禁用（T305） */
+  pending?: boolean;
 };
+
+/** pending（校验未完成）缓存的短 TTL：弱网下避免每条命令全量重试，但不长期禁用 */
+const PENDING_CACHE_TTL_MS = 2 * 60 * 1000;
+
+/** 校验总预算（默认 30s）：页面+脚本逐项 45s 超时叠加最坏可达数分钟，编排层会提前杀进程 */
+function availabilityTimeoutMs(): number {
+  const raw = parseInt(process.env['51JOB_AVAILABILITY_TIMEOUT_MS'] ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 30_000;
+}
 
 function readAvailabilityCache(): AvailabilityCache | null {
   const cached = readJson<AvailabilityCache>(join(cacheDir(), CACHE_FILE));
@@ -291,37 +308,59 @@ function readAvailabilityCache(): AvailabilityCache | null {
   return cached;
 }
 
-/** 业务命令入口调用；通过则静默返回，不通过抛 JobAvailabilityError（CLI 禁用）。 */
+/** 业务命令入口调用；基线不一致抛 JobAvailabilityError（CLI 禁用），网络类失败放行（T305）。 */
 export async function assertJobCliAvailable(): Promise<void> {
   const forceRefresh = process.env.JOB_AVAILABILITY_REFRESH === '1' || process.env['51JOB_AVAILABILITY_REFRESH'] === '1';
   if (!forceRefresh) {
     const cached = readAvailabilityCache();
-    if (cached && Date.now() - cached.checkedAtMs < CACHE_TTL_MS) {
-      if (!cached.ok) {
-        throw new JobAvailabilityError(formatDisabledMessage(cached.reasons ?? ['缓存的上次校验未通过']));
+    if (cached) {
+      const age = Date.now() - cached.checkedAtMs;
+      if (cached.pending && age < PENDING_CACHE_TTL_MS) {
+        warn('可用性校验近期未完成（网络原因），本次跳过校验继续执行');
+        return;
       }
-      return;
+      if (!cached.pending && age < CACHE_TTL_MS) {
+        if (!cached.ok) {
+          throw new JobAvailabilityError(formatDisabledMessage(cached.reasons ?? ['缓存的上次校验未通过']));
+        }
+        return;
+      }
     }
   }
 
   let ok = false;
   let reasons: string[] | undefined;
+  let pending = false;
+  const timeoutMs = availabilityTimeoutMs();
+  const overallTimeout = new Promise<never>((_, reject) => {
+    const t = setTimeout(() => reject(new Error(`校验总耗时超预算（${timeoutMs}ms）`)), timeoutMs);
+    if (typeof t.unref === 'function') t.unref();
+  });
   try {
-    await assertOnlineFrontendMatchesBaseline();
+    await Promise.race([assertOnlineFrontendMatchesBaseline(), overallTimeout]);
     ok = true;
   } catch (e) {
     if (e instanceof JobAvailabilityError) {
-      reasons = e.message.split('\n');
+      // 基线确不一致：禁用 + 失败缓存 6h（存原始 reasons，读取时才格式化）
+      reasons = e.reasons.length > 0 ? e.reasons : [e.message];
       throw e;
     }
-    throw e;
+    // 网络类/超时等异常（T305）：不禁用、不写 6h 失败缓存——一次断网不应让 CLI 哑半天。
+    // 放行执行 + 短 TTL pending 避免弱网下每条命令全量重试。
+    pending = true;
+    warn(`可用性校验未完成（${e instanceof Error ? e.message : String(e)}），本次跳过校验继续执行`);
+    return;
   } finally {
     try {
-      writeJson(join(cacheDir(), CACHE_FILE), {
-        checkedAtMs: Date.now(),
-        ok,
-        ...(reasons ? { reasons } : {}),
-      } satisfies AvailabilityCache);
+      writeJson(
+        join(cacheDir(), CACHE_FILE),
+        {
+          checkedAtMs: Date.now(),
+          ok,
+          ...(reasons ? { reasons } : {}),
+          ...(pending ? { pending: true } : {}),
+        } satisfies AvailabilityCache,
+      );
     } catch {
       /* 缓存写失败不影响校验结果 */
     }

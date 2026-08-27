@@ -151,6 +151,10 @@ export async function ensureBrowser(): Promise<Browser> {
   }
 
   const child = spawn(chromePath, args, { stdio: 'ignore', detached: false });
+  // T305 修复派生问题：浏览器是「常驻复用」设计（命令结束只断开连接不关进程），
+  // 若让 child 持有本进程事件循环，命令完成后 CLI 进程会一直挂着不退出。
+  // unref 后 CLI 可自然结束，Chrome 继续常驻供下条命令复用。
+  child.unref();
   const pid = child.pid;
 
   if (!pid) {

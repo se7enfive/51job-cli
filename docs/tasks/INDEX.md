@@ -46,7 +46,7 @@
 | T302 | CI 门禁与发布流程修复 | P1 | T301 | .github/workflows/*、package.json | todo |
 | T303 | smoke 冒烟测试隔离化 | P2 | 无 | scripts/smoke-*、core/state.ts、utils/store.ts | todo |
 | T304 | 脚本归档与死代码清理 | P2 | 无 | scripts/*、多个 src 文件 | todo |
-| T305 | availability 网络失败缓存修复 | P1 | 无 | core/availability.ts | todo |
+| T305 | availability 网络失败缓存修复 | P1 | 无 | core/availability.ts | done |
 | T306 | 异步超时与详情 tab 捕获加固 | P1 | T107 | ocr/baidu_ocr.ts、pages/candidate-detail.ts、pages/talent-insight.ts、core/pageGuards.ts | todo |
 | T307 | 浏览器生命周期加固 | P1 | T101 | core/browser.ts、core/sessionPage.ts | todo |
 | T308 | 默认拦截规则收敛 | P2 | 无 | core/pageGuards.ts | todo |
