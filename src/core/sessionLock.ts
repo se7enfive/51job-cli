@@ -1,6 +1,6 @@
 import { open, readFile, rm } from 'node:fs/promises';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { sleep } from '../browser/timing.js';
 import { cacheDir, ensureDirs } from '../utils/store.js';
 
@@ -13,8 +13,16 @@ type SessionLockMeta = {
   createdAt: number;
   hostname: string;
   cwd: string;
+  /** 脱敏命令摘要（T204）：仅「脚本名 + 子命令」，绝不含参数值——send --text 的消息内容等不落盘 */
   command: string;
 };
+
+/** 脱敏命令摘要：丢弃全部选项与参数值，仅保留脚本文件名与子命令名。 */
+function sanitizedCommand(): string {
+  const script = basename(process.argv[1] ?? '51job');
+  const sub = process.argv[2] && !process.argv[2].startsWith('-') ? ` ${process.argv[2]}` : '';
+  return `${script}${sub}`;
+}
 
 function buildSessionLockMeta(): SessionLockMeta {
   return {
@@ -22,7 +30,7 @@ function buildSessionLockMeta(): SessionLockMeta {
     createdAt: Date.now(),
     hostname: hostname(),
     cwd: process.cwd(),
-    command: process.argv.join(' ').trim(),
+    command: sanitizedCommand(),
   };
 }
 

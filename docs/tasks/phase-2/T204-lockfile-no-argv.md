@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 2 — 安全与隐私 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无 |
 | 验证 | 自动 |
 
@@ -37,6 +37,13 @@ command: process.argv.join(' ').trim(),
 - [ ] `51job send --text "秘密消息内容"` 执行期间检查 session.lock：文件中不含消息内容
 - [ ] 人为制造锁等待超时（并发两条命令）→ stderr 错误信息中不含消息内容
 - [ ] 锁的 stale 清理、30s 超时、EEXIST 重试逻辑行为不变（现有流程回归）
+
+## 实施记录（2026-08-27）
+
+- `buildSessionLockMeta.command` 改为 `sanitizedCommand()`：`basename(argv[1]) + 子命令名`（argv[2] 非 `-` 开头时），丢弃全部选项与参数值；类型注释写明「消息内容不落盘」。
+- `formatSessionLockOwner` 无需改动——输出的是脱敏后的 command 字段，超时错误信息随之干净。
+- 已验证（等价逻辑 4 组用例）：`send --text 秘密` → `index.js send`；`greet 张三 --job 测绘` → `index.js greet`；无子命令/仅有 flag → `index.js`；均不泄露参数值。
+- 锁获取/stale 清理/30s 超时/EEXIST 重试机制零改动。
 
 ## 注意事项
 
