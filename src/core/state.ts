@@ -26,7 +26,9 @@ export function clearState(): void {
 }
 
 export function defaultUserDataDir(): string {
-  return cacheDir();
+  // T303 隔离钩子：smoke 测试用 51JOB_USER_DATA_DIR 指向临时 profile，
+  // 避免复用/污染真实常驻浏览器实例
+  return process.env['51JOB_USER_DATA_DIR'] || cacheDir();
 }
 
 /**

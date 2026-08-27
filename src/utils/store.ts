@@ -22,7 +22,8 @@ export function jdDir(): string {
 }
 
 export function stateFile(): string {
-  return STATE_FILE;
+  // T303 隔离钩子：smoke 测试进程用 51JOB_STATE_FILE 指向临时目录，不触碰真实状态
+  return process.env['51JOB_STATE_FILE'] || STATE_FILE;
 }
 
 export function probeDir(): string {

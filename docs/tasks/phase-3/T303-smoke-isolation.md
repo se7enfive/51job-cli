@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 3 — 质量门禁与可靠性加固 |
 | 优先级 | P2 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无（T203 若改 store.ts，注意冲突组 G6） |
 | 验证 | 实机（本机 Chrome 环境） |
 
@@ -33,6 +33,15 @@
 - [ ] 运行前后真实 `~/.51job-cli/` 无任何变化（state.json mtime/内容不变）
 - [ ] 运行结束后无残留 Chrome 进程（任务管理器/`tasklist` 确认）
 - [ ] 本机无 Chrome 时（可用改 CHROME_PATH 指向不存在路径模拟）smoke 明确报错而非挂起
+
+## 实施记录（2026-08-27）
+
+- `npm run smoke` 前置 `npm run build`——全新 clone 一次通过。
+- **隔离钩子**：`store.ts` 的 `stateFile()` 支持 `51JOB_STATE_FILE` 覆盖；`state.ts` 的 `defaultUserDataDir()` 支持 `51JOB_USER_DATA_DIR` 覆盖（smoke 在 require dist 前设置，指向 `os.tmpdir()` 随机目录）。
+- 两个 smoke 脚本：临时目录 + 强制无头 + 结束 `shutdownBrowser()` + best-effort 删临时目录（Windows 文件锁释放延迟 → `maxRetries` + 失败仅 warn 不报红）。
+- smoke-guards 真实导航检查失败改 `[skip]` 标注；finally 结构化清理（原 disconnect-only + 无清理）。
+- **实机验证通过**：`npm run smoke` 10/10 通过、exit 0；真实 `~/.51job-cli/state.json` 全程未创建/未修改（隔离生效）。
+- README「smoke 需本机 Chrome」说明归 T403。
 
 ## 注意事项
 
