@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { config as loadEnv } from 'dotenv';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { unlinkSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { Command } from 'commander';
 import { shutdownBrowser, findChrome, ensureHeadfulForLogin } from './core/browser';
@@ -22,6 +23,7 @@ import { openTalentMgmtDetail, replyOnDetail, openCardDetail } from './pages/tal
 import { readPositions, jobsToRows, fetchJd } from './pages/job';
 import { probePage, printProbe } from './pages/probe';
 import { ensureDirs, root as storeRoot } from './utils/store';
+import { collectExpiredFiles } from './utils/clean';
 import { version } from '../package.json';
 
 // 环境变量加载：先读 ~/.51job-cli/.env（用户级持久配置），再读 ./.env（项目级覆盖）。
@@ -597,6 +599,38 @@ program
   .action(async () => {
     await shutdownBrowser();
     out('常驻浏览器已关闭（登录态保留在 ~/.51job-cli/.cache/）');
+  });
+
+program
+  .command('clean')
+  .description('清理本地生成物（ocr 简历截图/识别文本、probe 页面快照），不触碰登录态与 state.json')
+  .option('--dry-run', '只列出将删除的文件，不实际删除')
+  .option('--jd', '连同 jd/ 职位 JD 缓存一起清理')
+  .option('--all', '忽略保留期，清理全部')
+  .action(async (opts) => {
+    // 不走 runCommand：清理不需要浏览器，也不做可用性校验（离线可用）
+    const daysRaw = parseInt(process.env['51JOB_RETENTION_DAYS'] ?? '', 10);
+    const retentionDays = opts.all ? 0 : Number.isFinite(daysRaw) && daysRaw >= 0 ? daysRaw : 30;
+    const files = collectExpiredFiles(retentionDays, !!opts.jd);
+    if (files.length === 0) {
+      out(`没有超过保留期（${retentionDays} 天）的可清理文件`);
+      return;
+    }
+    if (opts.dryRun) {
+      for (const f of files) out(`[dry-run] ${f.dirLabel}/${basename(f.file)}（${f.ageDays} 天前）`);
+      out(`共 ${files.length} 个文件将被清理（保留期 ${retentionDays} 天）`);
+      return;
+    }
+    let removed = 0;
+    for (const f of files) {
+      try {
+        unlinkSync(f.file);
+        removed++;
+      } catch (e) {
+        warn(`删除失败（跳过）: ${f.file}（${e instanceof Error ? e.message : String(e)}）`);
+      }
+    }
+    out(`已清理 ${removed}/${files.length} 个文件（保留期 ${retentionDays} 天；登录态与 state.json 未触碰）`);
   });
 
 program

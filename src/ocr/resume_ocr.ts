@@ -34,7 +34,8 @@ export async function ocrResumePngToTextFile(pngAbsPath: string): Promise<{ text
   const run = async (): Promise<{ textPath: string; text: string }> => {
     const buf = await readFile(pngAbsPath);
     const text = await baiduOcrImageBase64(buf.toString('base64'));
-    await writeFile(textPath, text.endsWith('\n') ? text : `${text}\n`, 'utf8');
+    // T203：OCR 文本含候选人 PII，权限收紧（POSIX 生效，Windows 仅 read-only 位）
+    await writeFile(textPath, text.endsWith('\n') ? text : `${text}\n`, { encoding: 'utf8', mode: 0o600 });
     return { textPath, text };
   };
 

@@ -113,7 +113,8 @@ export async function probePage(page: Page): Promise<ProbeResult> {
     savePath: file,
   };
 
-  fs.writeFileSync(file, JSON.stringify(result, null, 2), 'utf-8');
+  // T203：probe 快照可能含候选人姓名等 PII，权限收紧（POSIX 生效，Windows 仅 read-only 位）
+  fs.writeFileSync(file, JSON.stringify(result, null, 2), { encoding: 'utf-8', mode: 0o600 });
   return result;
 }
 

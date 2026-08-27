@@ -1,5 +1,6 @@
 import type { Page } from 'puppeteer-core';
 import { join } from 'node:path';
+import { chmodSync } from 'node:fs';
 import { EHIRE_HOME } from '../core/browser';
 import { assertNoRisk } from '../core/guard';
 import { delay, Throttle } from '../core/throttle';
@@ -460,6 +461,8 @@ async function captureAndOcrResume(
   const pngPath = join(ocrDir(), `${safeResumeFileBase(name)}-${stamp}.png`);
   try {
     await dlg.screenshot({ path: pngPath, type: 'png', captureBeyondViewport: true });
+    // T203：截图含候选人 PII，权限收紧（POSIX 生效；失败不影响主流程）
+    try { chmodSync(pngPath, 0o600); } catch { /* Windows 上仅 read-only 位，忽略 */ }
     out(`简历截图已保存: ${pngPath}`);
   } catch (e) {
     warn(`简历截图失败: ${e instanceof Error ? e.message : String(e)}`);

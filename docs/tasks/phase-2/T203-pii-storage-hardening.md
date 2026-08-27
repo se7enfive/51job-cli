@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 2 — 安全与隐私 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无（与 T201 同改 utils/store.ts，注意串行） |
 | 验证 | 自动 + Unix 环境抽查 |
 
@@ -37,6 +37,14 @@
 - [ ] `51job clean --dry-run` 列出过期文件且不删除；去掉 --dry-run 后按期清理
 - [ ] `51job clean` 后登录态完好（`.cache` 未动），下一条命令免登录可用（🧪）
 - [ ] `51JOB_RETENTION_DAYS=0` 全清 ocr/probe；默认 30 天
+
+## 实施记录（2026-08-27）
+
+- **权限**（目录/JSON 部分随 T201 已落）：OCR 文本（resume_ocr.ts writeFile mode 0600）、probe 快照（probe.ts writeFileSync mode 0600）、截图（chat.ts screenshot 后 chmodSync 0600，失败不阻断）；注释注明 Windows 仅 read-only 位。jd 缓存（公开职位信息）未加 chmod。
+- **`51job clean` 命令**：`src/utils/clean.ts` 提供 `collectExpiredFiles(retentionDays, includeJd)`（按 mtime，仅平铺文件）；命令支持 `--dry-run` / `--jd`（默认不清理 jd） / `--all`；保留期默认 30 天，`51JOB_RETENTION_DAYS` 可配（0=全部）。不走 runCommand（无需浏览器、离线可用、不做可用性校验）。
+- **端到端验证通过**（本机）：旧文件（603 天）被 dry-run 列出并清理，新文件保留，`.cache` 内植入的哨兵文件未触碰。
+- 「按天建子目录」可选项未做（平铺 + mtime 已满足），后续文件量大了再议。
+- README 安全提示归 T403。
 
 ## 注意事项
 
