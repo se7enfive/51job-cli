@@ -51,7 +51,7 @@
 | T307 | 浏览器生命周期加固 | P1 | T101 | core/browser.ts、core/sessionPage.ts | done |
 | T308 | 默认拦截规则收敛 | P2 | 无 | core/pageGuards.ts | done |
 | T401 | 环境变量统一（命名与优先级） | P2 | 无 | core/browser.ts、ocr/baidu_ocr.ts | done |
-| T402 | `.env.example` 修正 | P2 | T202、T205、T401 | .env.example | todo |
+| T402 | `.env.example` 修正 | P2 | T202、T205、T401 | .env.example | done |
 | T403 | README / CAPABILITIES / AGENTS / RELEASE 同步 | P2 | 多数任务后 | README.md、docs/CAPABILITIES.md、AGENTS.md、RELEASE.md | todo |
 | T404 | 仓库卫生（LICENSE / lockfile / main / CHANGELOG） | P2 | 无 | LICENSE、package.json、package-lock.json | todo |
 
