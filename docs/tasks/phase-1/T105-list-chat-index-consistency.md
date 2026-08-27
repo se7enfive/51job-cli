@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 1 — 正确性与退出码契约 |
 | 优先级 | P0 |
-| 状态 | todo |
+| 状态 | done（2026-08-27，实机回归待批次） |
 | 依赖 | 无 |
 | 验证 | 自动（逻辑层）+ 实机 🧪 |
 
@@ -45,6 +45,15 @@
 - [ ] 实机 🧪：全量 `list` 第 N 项 → `chat --index N`（不带 --unread）定位一致
 - [ ] `--index 0` 不再被静默吞掉（明确报「序号从 1 开始」或按语义处理）
 - [ ] 纯 `chat <姓名>` 路径行为不回归
+
+## 实施记录（2026-08-27）
+
+- `inbox.ts` 抽出 `collectInboxCandidates(page, {throttle})`：与 list 完全一致的过滤+编号逻辑；`readInbox` 改为在其上做 `--unread` 过滤。
+- `openChat` 新增 `unreadOnly` 选项：index 模式直接用 `collectInboxCandidates` 结果取 `pool[index-1].name`（Candidate 已含姓名，不再碰元素句柄）；越界/空列表提示注明「序号口径与 list 输出一致」。
+- `index.ts` chat action：传入 `unreadOnly: opts.unread`（死选项激活）；`opts.index` 判断改 `!== undefined`（`--index 0` 不再被吞，交由 openChat 报越界）。
+- chat 帮助文案更新（--index/--unread 口径说明）。
+- `previewResume` 对 `openChat` 的调用不传 index，不受签名变更影响。
+- `npm run build` 通过。序号一致性实机验证（list ↔ chat 定位同人）归实机批次。
 
 ## 注意事项
 

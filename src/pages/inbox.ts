@@ -86,11 +86,14 @@ export async function collectDeliveryCards(page: Page) {
 }
 
 /**
- * 读取候选人/投递列表（我的工作台投递视图）。
+ * 收集「与 list 输出完全一致」的候选人序列（T105）：
+ * 过滤非投递卡（摘要含「投递了」）+ 统一 1-based 编号。
+ * readInbox（list 命令）与 openChat（chat --index）共用同一实现，
+ * 保证 `list` 输出的 # 列与 `chat --index N` 定位的是同一个人。
  */
-export async function readInbox(
+export async function collectInboxCandidates(
   page: Page,
-  opts: { unreadOnly?: boolean; throttle?: Throttle } = {}
+  opts: { throttle?: Throttle } = {}
 ): Promise<Candidate[]> {
   await assertNoRisk(page, { action: '读取候选人列表', soft: true });
 
@@ -148,7 +151,18 @@ export async function readInbox(
       });
     }
   }
+  return candidates;
+}
 
+/**
+ * 读取候选人/投递列表（我的工作台投递视图）。
+ * 序号口径见 collectInboxCandidates；--unread 在其结果上再过滤（编号保持原序号）。
+ */
+export async function readInbox(
+  page: Page,
+  opts: { unreadOnly?: boolean; throttle?: Throttle } = {}
+): Promise<Candidate[]> {
+  const candidates = await collectInboxCandidates(page, { throttle: opts.throttle });
   if (opts.unreadOnly) {
     return candidates.filter((c) => c.unread);
   }

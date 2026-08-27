@@ -5,7 +5,7 @@ import { assertNoRisk } from '../core/guard';
 import { delay, Throttle } from '../core/throttle';
 import { out, warn } from '../utils/output';
 import { selectors } from './selectors';
-import { collectDeliveryCards } from './inbox';
+import { collectInboxCandidates } from './inbox';
 import { ocrDir } from '../utils/store';
 import { isResumeOcrEnabled, ocrResumePngToTextFile } from '../ocr/resume_ocr';
 
@@ -63,17 +63,18 @@ async function collectTalentRows(page: Page): Promise<TalentRow[]> {
  * 面板内 .input-textarea_self 输入框（placeholder「发送给 <姓名>」）+ .new-send-button 发送。
  *
  * 注意 DOM 中常驻一个 0x0 的隐藏 im-chat-panel 模板实例——所有元素匹配必须校验可见性（rect>0）。
- * 支持 --index 指定 list 输出序号（先在工作台投递列表解析姓名，再去人才管理匹配），
+ * 支持 --index 指定 list 输出序号（序号口径与 list 完全一致：collectInboxCandidates
+ * 过滤非投递卡后统一编号；--unread 再按未读过滤，即 list --unread 的序号），
  * --strict 要求姓名精确相等。
  */
 export async function openChat(
   page: Page,
-  opts: { name?: string; index?: number; strict?: boolean; throttle?: Throttle } = {}
+  opts: { name?: string; index?: number; unreadOnly?: boolean; strict?: boolean; throttle?: Throttle } = {}
 ): Promise<boolean> {
   await assertNoRisk(page, { action: '打开会话', soft: false });
   if (opts.throttle) await opts.throttle.wait();
 
-  // 1. 解析目标姓名（index 模式：先回工作台投递列表拿姓名）
+  // 1. 解析目标姓名（index 模式：用与 list 一致的序号空间解析，T105）
   let targetName = opts.name ?? '';
   if (!targetName && opts.index !== undefined) {
     const url = page.url();
@@ -81,23 +82,25 @@ export async function openChat(
       await page.goto(EHIRE_HOME, { waitUntil: 'domcontentloaded', timeout: 60_000 });
       await delay(1500 + Math.random() * 1000);
     }
-    const items = await collectDeliveryCards(page);
-    if (items.length === 0) {
-      warn('未定位到工作台投递列表，无法解析序号对应的姓名。');
+    const candidates = await collectInboxCandidates(page);
+    const pool = opts.unreadOnly ? candidates.filter((c) => c.unread) : candidates;
+    if (pool.length === 0) {
+      warn(
+        opts.unreadOnly
+          ? '未读列表为空（或未定位到投递列表），无法解析序号。'
+          : '未定位到工作台投递列表，无法解析序号对应的姓名。'
+      );
       return false;
     }
-    const card = items[opts.index - 1];
-    if (!card) {
-      warn(`序号 ${opts.index} 超出列表范围（共 ${items.length} 条）`);
+    const cand = pool[opts.index - 1];
+    if (!cand) {
+      warn(
+        `序号 ${opts.index} 超出列表范围（共 ${pool.length} 条${opts.unreadOnly ? '未读' : ''}）。` +
+          '序号口径与 list 输出一致，请重新运行 list 确认。'
+      );
       return false;
     }
-    targetName =
-      (await card
-        .evaluate((el, sel) => {
-          const n = el.querySelector(sel);
-          return n ? (n.textContent || '').trim() : '';
-        }, selectors.inbox.name)
-        .catch(() => '')) ?? '';
+    targetName = cand.name;
     if (!targetName) {
       warn(`无法读取序号 ${opts.index} 对应的候选人姓名。`);
       return false;

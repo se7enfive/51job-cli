@@ -159,15 +159,18 @@ program
   .command('chat')
   .description('打开指定候选人会话')
   .argument('[姓名]', '候选人姓名（优先用 --index 精确定位）')
-  .option('--index <序号>', '列表序号（对应 list 输出）')
-  .option('--unread', '对应 list --unread 的序号')
+  .option('--index <序号>', '列表序号（与 list 输出的 # 列一致）')
+  .option('--unread', '使用未读列表序号（与 list --unread 输出一致）')
   .option('--strict', '精确匹配姓名')
   .action(async (name, opts) => {
     const throttle = createThrottle(parseThrottleEnv());
     await runCommand(async (page) => {
       const opened = await openChat(page, {
         name: name || undefined,
-        index: opts.index ? parseInt(opts.index, 10) : undefined,
+        // T105：--unread 真正生效；opts.index !== undefined（0 是非法序号而非「未提供」，
+        // 交由 openChat 报越界，不再被 falsy 吞掉静默回退姓名匹配）
+        index: opts.index !== undefined ? parseInt(opts.index, 10) : undefined,
+        unreadOnly: opts.unread,
         strict: opts.strict,
         throttle,
       });
