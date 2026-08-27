@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 1 — 正确性与退出码契约 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无 |
 | 验证 | 自动 + 管道实机 |
 
@@ -29,6 +29,17 @@
 - [ ] `51job greet X`（未传 --no-confirm，stdin 关闭）→ 立即拒绝，退出码非 0 或明确「已跳过」，不挂起
 - [ ] 交互 TTY 下 Y/n 行为与之前完全一致
 - [ ] `--no-confirm` 路径不经过 confirmAction，行为不变
+
+## 实施记录（2026-08-27）
+
+- `confirmAction` 重写三层防护：
+  1. **非 TTY 立即拒绝**（不创建 readline）+ warn 提示用 `--no-confirm`；
+  2. **EOF（stdin 关闭）拒绝**：`rl.on('close')` → settle(false)，`settled` 标志防双 settle；
+  3. **超时拒绝**：默认 300s，`51JOB_CONFIRM_TIMEOUT_MS` 可配（<=0 关闭）；timer `unref()` 不阻塞进程。
+- action 命令已有 `--no-confirm` 选项（index.ts:185），greet 亦然——任务第 2 点核查通过，无需补。
+- 已验证：管道环境（本会话 shell）确认 4ms 内返回 false；强制 TTY + 销毁 stdin（EOF）返回 false 不挂起。
+- `defaultYes` 语义仅在 TTY 有输入时生效——「EOF 默认同意」不存在，不可逆操作无人工输入即拒绝。
+- 「非交互必须 --no-confirm」的文档化归 T403。
 
 ## 注意事项
 

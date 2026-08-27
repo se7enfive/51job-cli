@@ -35,7 +35,7 @@
 | T106 | Hi 结果判定收敛到被点击卡片 | P0 | 无 | pages/hi-result.ts、pages/recommend.ts、pages/search.ts | done |
 | T107 | 详情页身份校验与错位防护 | P0 | 无 | pages/talent-insight.ts、pages/candidate-detail.ts、index.ts | done |
 | T108 | 会话重试边界：写操作不自动重跑 | P0 | 无 | core/sessionPage.ts、pages/chat.ts | done |
-| T109 | 非交互确认安全（stdin EOF 不挂起） | P1 | 无 | utils/confirm.ts | todo |
+| T109 | 非交互确认安全（stdin EOF 不挂起） | P1 | 无 | utils/confirm.ts | done |
 | T110 | 输入防护杂项（未命中/空关键词/0 falsy） | P1 | T105 | index.ts、pages/search.ts | todo |
 | T201 | CDP 调试端点收敛 | P0 | 无 | core/browser.ts、utils/store.ts | todo |
 | T202 | 简历 OCR 改显式 opt-in | P0 | 无 | ocr/resume_ocr.ts、pages/chat.ts | todo |
