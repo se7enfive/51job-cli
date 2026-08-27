@@ -13,7 +13,8 @@ export function readState(): BrowserState | null {
 }
 
 export function writeState(state: BrowserState): void {
-  writeJson(stateFile(), state);
+  // T201：state.json 含 CDP 调试端口（拿到即可接管浏览器），权限收紧到仅本用户
+  writeJson(stateFile(), state, 0o600);
 }
 
 export function clearState(): void {

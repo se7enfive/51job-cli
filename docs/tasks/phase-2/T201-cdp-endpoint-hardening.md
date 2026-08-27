@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 2 — 安全与隐私 |
 | 优先级 | P0 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无 |
 | 验证 | 实机 🧪（必须验证 puppeteer 连接不回归） |
 
@@ -42,6 +42,14 @@
 - [ ] Unix 环境下 `state.json` 权限 600、`.cache` 目录 700（WSL 或 CI Linux 验证均可）
 - [ ] `51job doctor` 输出不泄露端口（确认现状即可）
 - [ ] 实施记录中写明 pipe 改造结论（做/不做/另立任务）
+
+## 实施记录（2026-08-27）
+
+- **移除 `--remote-allow-origins=*`**（browser.ts），代码注释说明原因与回退方案。
+- **实机验证通过**：关闭旧常驻实例（登录态保留）→ 无头全新 spawn（新参数）→ `puppeteer.connect({ browserURL })` 成功（CONNECT_OK pages=1）→ shutdown 清理完成。puppeteer WS 客户端不发送 Origin 头，Chrome 默认校验不拦截。
+- **state.json 权限 0o600**：`writeJson` 增加 mode 参数（store.ts），`writeState` 传入 0o600（state.ts）；`ensureDirs` 全部目录 0700。注释注明 POSIX 生效、Windows 依赖单用户边界。
+- **实施记录·pipe 决策**：`--remote-debugging-pipe` 改造**暂不立项**——需把连接方式从 browserURL 改为 spawn transport，改动面大；当前端口仅绑 127.0.0.1 + 无通配 Origin + state 0600 已显著收敛。若未来需要更高保障再单独立任务。
+- README/AGENTS 安全章节文档归 T403。
 
 ## 注意事项
 

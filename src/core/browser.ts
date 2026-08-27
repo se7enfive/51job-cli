@@ -135,7 +135,10 @@ export async function ensureBrowser(): Promise<Browser> {
   const args = [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userDataDir}`,
-    '--remote-allow-origins=*',
+    // 安全（T201）：不再带 --remote-allow-origins=* —— 该参数关闭 CDP WebSocket 的
+    // Origin 校验，等于允许任意网页/进程接管已登录浏览器。puppeteer 的 WS 客户端
+    // 不发送 Origin 头，Chrome 默认校验下仍可正常连接（实施记录已实测）。
+    // 若未来某 Chrome 版本导致连接失败，回退方案是精确白名单而非通配符。
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-features=Translate',
