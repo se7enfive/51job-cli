@@ -8,12 +8,42 @@
 const BAIDU_TOKEN_URL = 'https://aip.baidubce.com/oauth/2.0/token';
 const BAIDU_OCR_ACCURATE_BASIC = 'https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic';
 
+/**
+ * 解析百度凭证（T401 统一优先级）：`51JOB_BAIDU_API_KEY` / `51JOB_BAIDU_SECRET_KEY`
+ * 优先（可与其他工具隔离）；通用 `API_KEY` / `SECRET_KEY` 仅兜底（与其他工具串扰风险）。
+ * 导出供单元测试。
+ */
+export function resolveBaiduCredentials(): {
+  key: string | undefined;
+  secret: string | undefined;
+  usedGenericNames: boolean;
+} {
+  const key51 = process.env['51JOB_BAIDU_API_KEY']?.trim() || undefined;
+  const secret51 = process.env['51JOB_BAIDU_SECRET_KEY']?.trim() || undefined;
+  const keyGeneric = process.env.API_KEY?.trim() || undefined;
+  const secretGeneric = process.env.SECRET_KEY?.trim() || undefined;
+  if (key51 || secret51) {
+    // 专用名存在时以专用名为准（哪怕只配了一半，也不用通用名拼接——避免错配）
+    return { key: key51, secret: secret51, usedGenericNames: false };
+  }
+  return { key: keyGeneric, secret: secretGeneric, usedGenericNames: !!(keyGeneric && secretGeneric) };
+}
+
+let warnedGenericNames = false;
+
 function apiKey(): string | undefined {
-  return process.env.API_KEY?.trim() || process.env['51JOB_BAIDU_API_KEY']?.trim();
+  const { key, usedGenericNames } = resolveBaiduCredentials();
+  if (usedGenericNames && !warnedGenericNames) {
+    warnedGenericNames = true;
+    process.stderr.write(
+      '⚠ 检测到使用通用环境变量 API_KEY/SECRET_KEY 作为百度凭证，建议改用 51JOB_BAIDU_API_KEY/51JOB_BAIDU_SECRET_KEY 以免与其他工具串扰。\n',
+    );
+  }
+  return key;
 }
 
 function secretKey(): string | undefined {
-  return process.env.SECRET_KEY?.trim() || process.env['51JOB_BAIDU_SECRET_KEY']?.trim();
+  return resolveBaiduCredentials().secret;
 }
 
 export function isBaiduOcrConfigured(): boolean {

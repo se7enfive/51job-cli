@@ -67,10 +67,20 @@ function findFreePort(): Promise<number> {
   });
 }
 
-function getHeadlessFlag(): boolean {
-  const override = process.env['RECRUIT_BROWSER_HIDDEN'] || process.env['51JOB_BROWSER_HEADLESS'];
-  if (override !== undefined && override !== '') {
-    return override === 'true' || override === '1';
+/** 无头开关解析。导出供单元测试（T401）。 */
+export function getHeadlessFlag(): boolean {
+  // T401 变量统一：文档名为 RECRUIT_BROWSER_HEADLESS（原 RECRUIT_BROWSER_HIDDEN
+  // 语义反直觉且与文档不符，兼容一个版本并提示迁移）。51JOB 专用名优先。
+  const headless = process.env['51JOB_BROWSER_HEADLESS'] || process.env['RECRUIT_BROWSER_HEADLESS'] || '';
+  const legacy = process.env['RECRUIT_BROWSER_HIDDEN'] || '';
+  if (legacy) {
+    warn('RECRUIT_BROWSER_HIDDEN 已更名为 RECRUIT_BROWSER_HEADLESS，请迁移配置（本版本仍兼容）');
+    if (!headless) {
+      return legacy === 'true' || legacy === '1';
+    }
+  }
+  if (headless) {
+    return headless === 'true' || headless === '1';
   }
   // 默认有头模式。无头 Chrome 的 UA 自报 HeadlessChrome 且 Client Hints 仍说 Google Chrome，
   // 自相矛盾会被平台风控识别为工具指纹（boss-cli 实测封号）。

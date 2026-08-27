@@ -651,7 +651,7 @@ program
     out(`Chrome: ${chrome || '未找到 (请设置 CHROME_PATH)'}`);
     out(`数据目录: ${storeRoot()}`);
     out(`反检测: 注入伪装 + CDP 网络拦截 + 风控熔断`);
-    out(`默认浏览器模式: 有头 (可用 51JOB_BROWSER_HEADLESS=true 覆盖，但不建议)`);
+    out(`浏览器模式: 有头（默认；51JOB_BROWSER_HEADLESS / RECRUIT_BROWSER_HEADLESS=true 可覆盖为无头，不建议）`);
   });
 
 program

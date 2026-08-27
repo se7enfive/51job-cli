@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 4 — 文档与配置对齐 |
 | 优先级 | P2 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无（先行，T402/T403 文档以本任务结果为准） |
 | 验证 | 自动 + 单测 |
 
@@ -29,6 +29,14 @@
 - [ ] 同时设 `51JOB_BAIDU_API_KEY` 与 `API_KEY` → 用 51JOB 专用值，且有 warn
 - [ ] 只设旧名 `RECRUIT_BROWSER_HIDDEN` → 仍生效 + 迁移 warn
 - [ ] 相关单测通过（或占位用例随 T301 转绿）
+
+## 实施记录（2026-08-27）
+
+- `getHeadlessFlag`（browser.ts，已导出供测试）：优先级 `51JOB_BROWSER_HEADLESS` > `RECRUIT_BROWSER_HEADLESS` > 旧名 `RECRUIT_BROWSER_HIDDEN`（兼容一个版本 + 迁移 warn）。
+- `resolveBaiduCredentials`（baidu_ocr.ts，已导出）：51JOB 专用名优先；专用名存在（哪怕不完整）不与通用名拼接，避免错配；仅用通用名时 stderr 提示迁移（每进程一次）。
+- `doctor` 文案更新：列出实际支持的无头变量。
+- 新增 `test/env-unification.test.ts`（10 用例）：新旧名解析、优先级、百度凭证优先级矩阵。
+- 61/61 通过；build + typecheck 干净。旧名移除时间记入 CHANGELOG（T404）。
 
 ## 注意事项
 
