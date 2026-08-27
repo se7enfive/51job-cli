@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 3 — 质量门禁与可靠性加固 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | T101（fail 清理修复后，残留 tab 场景大减；本任务处理剩余场景） |
 | 验证 | 实机 🧪（故障注入） |
 
@@ -31,6 +31,15 @@
 - [ ] 手动打开一个详情 tab 后跑 `list` → 选中工作台页而非详情页（🧪）
 - [ ] 正常复用路径（pid 活 + 端口通）行为不变
 - [ ] Windows 与（如有条件）WSL 双平台走查命令行探测分支
+
+## 实施记录（2026-08-27）
+
+- **复用失败自愈**：`ensureBrowser` 拆分「pid 活」分支——端口通则复用；端口不通则 `readProcessCommandLine`（win32: PowerShell `Get-CimInstance`；POSIX: `ps -p`）确认命令行含我们的 `userDataDir` 才 kill，等待退出（最多 5s）释放 profile 锁后清 state 重启；命令行不匹配（pid 复用）只重置状态不杀进程；命令行读取失败保守放行到正常报错路径。
+- **端口就绪失败文案**：补充 profile 锁/端口抢占等原因与自愈指引。
+- **`pickExistingPage` 三级选页**：主壳页（navigate/talent/management/search）> 其他非子页 ehire 页 > 任意非空白页；`/resume/detail` 与风险关键词页面被排除。
+- **findFreePort**：TOCTOU 注释记录（保持现状，端口就绪检测兜底）。
+- **实机验证通过**（临时脚本，headless）：场景 A——state 指向存活非 Chrome 进程（本测试进程）→ 识别 pid 复用、不误杀、正常起新实例；场景 B——真实 Chrome 占 profile 无调试端口 → 识别失联、清理重启、正常连接。
+- 教训记录：最初用内联 `node -e` 测试时，脚本文本含 userDataDir 字符串被身份校验正确 kill——守卫生效的意外证明，也说明身份校验基于命令行匹配的边界（测试需用脚本文件）。
 
 ## 注意事项
 

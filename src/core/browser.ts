@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as net from 'net';
 import * as path from 'path';
-import { spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import puppeteer, { Browser, Page } from 'puppeteer-core';
 import { ensureDirs, cacheDir } from '../utils/store';
 import { err, warn } from '../utils/output';
@@ -62,6 +62,8 @@ export function findChrome(): string | null {
 }
 
 function findFreePort(): Promise<number> {
+  // T307 备注：listen(0) 关闭后到 Chrome 绑定之间存在 TOCTOU 竞口窗口——
+  // 极小概率被其他进程抢占；此时端口就绪检测会失败并走明确的报错路径，可接受。
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
     srv.unref();
@@ -103,18 +105,63 @@ async function connectBrowser(port: number): Promise<Browser> {
 }
 
 /**
+ * 读取 pid 对应进程的命令行（T307）：用于确认该进程确属本工具拉起的 Chrome
+ * （命令行包含我们的 user-data-dir），避免 state.json 被篡改/pid 被系统复用时误杀。
+ * 读取失败返回空串（保守处理：不 kill）。
+ */
+function readProcessCommandLine(pid: number): Promise<string> {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      // wmic 在新 Windows 已弃用，走 PowerShell CIM
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+        { timeout: 5000 },
+        (err, stdout) => resolve(err ? '' : String(stdout).trim()),
+      );
+      return;
+    }
+    execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout: 5000 }, (err, stdout) =>
+      resolve(err ? '' : String(stdout).trim()),
+    );
+  });
+}
+
+/**
  * 获取一个已连接的可控浏览器。
  * - 若已有常驻实例（state.json 中 pid 存活 + 端口可连），复用之；
+ * - pid 活但端口不通（Chrome 卡死/半死，T307）：确认进程身份后清理重启，避免
+ *   同 user-data-dir 二次 spawn 撞 profile 锁导致永久卡死；
  * - 否则启动一个新的有头 Chrome（独立 user-data-dir），记录 state 供跨命令复用。
  */
 export async function ensureBrowser(): Promise<Browser> {
   ensureDirs();
 
   const existing = readState();
-  if (existing && isProcessAlive(existing.pid) && (await isPortOpen(existing.port))) {
-    try {
-      return await connectBrowser(existing.port);
-    } catch {
+  if (existing && isProcessAlive(existing.pid)) {
+    if (await isPortOpen(existing.port)) {
+      try {
+        return await connectBrowser(existing.port);
+      } catch {
+        clearState();
+      }
+    } else {
+      // T307 自愈：仅当命令行确认是我们拉起的浏览器时才 kill（防 pid 复用误杀），
+      // 然后清 state 走正常 spawn；等待退出以释放 profile 锁。
+      const cmdline = await readProcessCommandLine(existing.pid);
+      if (cmdline && cmdline.includes(existing.userDataDir)) {
+        warn(`常驻浏览器进程失联（pid ${existing.pid} 调试端口不通），正在清理后重启…`);
+        try {
+          process.kill(existing.pid);
+        } catch {
+          /* ignore */
+        }
+        for (let i = 0; i < 25 && isProcessAlive(existing.pid); i++) {
+          await new Promise((r) => setTimeout(r, 200));
+        }
+      } else if (cmdline) {
+        warn(`state.json 中的 pid ${existing.pid} 非本工具的浏览器进程（疑似 pid 复用），已重置状态`);
+      }
       clearState();
     }
   }
@@ -169,7 +216,10 @@ export async function ensureBrowser(): Promise<Browser> {
   }
 
   if (!(await isPortOpen(port))) {
-    throw new Error('Chrome 调试端口未就绪，启动失败');
+    throw new Error(
+      'Chrome 调试端口未就绪，启动失败。可能原因：user-data-dir 被其他 Chrome 实例锁定（profile 锁）、' +
+        '调试端口被抢占，或浏览器可执行文件异常。可删除 ~/.51job-cli/state.json 及 .cache 目录后重试（登录态会丢失，需重新扫码）。',
+    );
   }
 
   writeState({ pid, port, userDataDir, startedAt: new Date().toISOString() } as BrowserState);

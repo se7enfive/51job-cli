@@ -48,7 +48,7 @@
 | T304 | 脚本归档与死代码清理 | P2 | 无 | scripts/*、多个 src 文件 | todo |
 | T305 | availability 网络失败缓存修复 | P1 | 无 | core/availability.ts | done |
 | T306 | 异步超时与详情 tab 捕获加固 | P1 | T107 | ocr/baidu_ocr.ts、pages/candidate-detail.ts、pages/talent-insight.ts、core/pageGuards.ts | done |
-| T307 | 浏览器生命周期加固 | P1 | T101 | core/browser.ts、core/sessionPage.ts | todo |
+| T307 | 浏览器生命周期加固 | P1 | T101 | core/browser.ts、core/sessionPage.ts | done |
 | T308 | 默认拦截规则收敛 | P2 | 无 | core/pageGuards.ts | todo |
 | T401 | 环境变量统一（命名与优先级） | P2 | 无 | core/browser.ts、ocr/baidu_ocr.ts | todo |
 | T402 | `.env.example` 修正 | P2 | T202、T205、T401 | .env.example | todo |

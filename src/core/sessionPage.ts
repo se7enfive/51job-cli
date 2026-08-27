@@ -36,6 +36,11 @@ function assertNoPageRisk(page: Page): void {
   );
 }
 
+/** 业务子页/风险页：命令主壳不应落在这些页面上（T307），选页时排除 */
+const MAIN_SHELL_EXCLUDE_RE = /resume\/detail|verify|captcha|security|checkcode|safeguard|blocked/i;
+/** 主壳页优先级：工作台 / 人才管理 / 人才搜索（含推荐页，includes 前缀相同） */
+const MAIN_SHELL_PREFER_RE = /\/Revision\/navigate|\/Revision\/talent\/management|\/Revision\/talent\/search/i;
+
 async function pickExistingPage(browser: Browser): Promise<Page | null> {
   const pages = (await browser.pages()).filter((p) => !p.isClosed());
   if (pages.length === 0) return null;
@@ -50,17 +55,23 @@ async function pickExistingPage(browser: Browser): Promise<Page | null> {
     }),
   );
 
-  // 选最后一个 ehire tab（最新的，保留上次命令的操作状态如搜索结果）
-  let ehire: Page | undefined;
+  // T307：优先主壳页中最新的一个（工作台/人才管理/搜索）——残留的详情 tab、
+  // 用户手动打开的业务子页不再被选为主工作页（此前取「最后一个 ehire tab」）。
   for (let i = pages.length - 1; i >= 0; i--) {
     const u = urls[i] ?? '';
-    if (u.length > 0 && u !== 'about:blank' && isEhireSiteUrl(u)) {
-      ehire = pages[i];
-      break;
+    if (u.length > 0 && u !== 'about:blank' && isEhireSiteUrl(u) && MAIN_SHELL_PREFER_RE.test(u)) {
+      return pages[i];
     }
   }
-  if (ehire) return ehire;
+  // 其次：其他 ehire 主壳页（排除详情/验证类业务子页）
+  for (let i = pages.length - 1; i >= 0; i--) {
+    const u = urls[i] ?? '';
+    if (u.length > 0 && u !== 'about:blank' && isEhireSiteUrl(u) && !MAIN_SHELL_EXCLUDE_RE.test(u)) {
+      return pages[i];
+    }
+  }
 
+  // 兜底：任意非空白页（ensureEhireUrl 会导航回 ehire 主壳）
   let nonBlank: Page | undefined;
   for (let i = pages.length - 1; i >= 0; i--) {
     const u = urls[i] ?? '';
