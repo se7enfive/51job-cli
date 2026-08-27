@@ -257,7 +257,12 @@ program
           fail(`未在推荐列表定位到「${opts.inspect}」（共 ${hits.length} 条）`);
           return;
         }
-        const opened = await openCardDetail(bid, page, idx, selectors.recommend.resultItem, { throttle });
+        // T107：把定位时的姓名传给详情打开器做交叉校验，防止「读列表定位」与
+        // 「重新取卡片」两步之间列表重排导致打开错误候选人
+        const opened = await openCardDetail(bid, page, idx, selectors.recommend.resultItem, {
+          throttle,
+          verifyName: hits[idx - 1]?.name,
+        });
         if (!opened) { fail('详情打开失败'); return; }
         // 风控熔断：命中「简历查看受限」→ 输出限制说明 JSON，非零退出（编排层据此停手）
         if ('viewLimited' in opened && opened.viewLimited) {
@@ -278,6 +283,8 @@ program
         }
         trackExtraPage(opened.page!);
         const d = opened.detail!;
+        // T107：详情缺姓名 = 提取不完整，视为失败（输出 {} + 退出 0 会误导编排层）
+        if (!d.name) fail('详情提取结果缺少姓名（可能详情未渲染完整），请重试或人工核对');
         if (getFormat() === 'json') {
           printJson({ ...d, recommendIndex: idx, recommendName: hits[idx - 1]?.name, forJob: hits[idx - 1]?.forJob });
         } else {
@@ -425,6 +432,8 @@ program
       if (!opened) { fail('详情打开失败'); return; }
       trackExtraPage(opened.page);
       const d = opened.detail;
+      // T107：详情缺姓名 = 提取不完整，视为失败（输出 {} + 退出 0 会误导编排层）
+      if (!d.name) fail('详情提取结果缺少姓名（可能详情未渲染完整），请重试或人工核对');
 
       // --hi 结果并入最终单文档（T103）；error 字段与 stderr ✖ 消息同源。
       // 退出码契约（T102）：failed/unknown 在 JSON 模式同样非零退出。
@@ -467,6 +476,8 @@ program
       if (!opened) { fail(`详情打开失败: ${name}`); return; }
       trackExtraPage(opened.page);
       const d = opened.detail;
+      // T107：详情缺姓名 = 提取不完整，视为失败（输出 {} + 退出 0 会误导编排层）
+      if (!d.name) fail('详情提取结果缺少姓名（可能详情未渲染完整），请重试或人工核对');
 
       // --hi（人才管理来源 = 「回复」，免费不耗点数）结果并入最终单文档（T103）。
       // 退出码契约：success → 0；none → 0（无按钮=可能已回复过，非失败）；failed → 1（JSON 模式同样）

@@ -182,12 +182,15 @@ export async function openTalentMgmtDetail(
 
   // 6. 等新 tab 并读取
   const target = await newTargetP;
-  let detailPage: Page;
-  if (target && target.page) {
-    detailPage = (await target.page()) || page;
-  } else {
-    warn('未捕获到新 tab（10s），回退到人才管理页本身');
-    detailPage = page;
+  if (!target) {
+    // T107：与 openDetailByIndex 同语义——无新 tab 判失败，不把人才管理页当详情页空读
+    warn('未捕获到新 tab（10s）：站点可能未新开详情页，详情提取失败');
+    return null;
+  }
+  const detailPage = (await target.page()) || page;
+  if (detailPage === page) {
+    warn('新 tab 目标无效，详情提取失败');
+    return null;
   }
   await detailPage.bringToFront().catch(() => {});
   await delay(1800 + Math.random() * 800);
@@ -420,15 +423,21 @@ export async function openCardDetail(
   if (opts.throttle) await opts.throttle.wait();
   const detail = await readCandidateDetail(detailPage, { throttle: opts.throttle });
 
-  // 校验：详情页姓名 vs 卡片姓名（错位则有限重试）
+  // 校验：详情页姓名 vs 卡片姓名（错位则有限重试；耗尽即失败，T107）
   const detailName = (detail.name || '').trim();
   const verify = opts.verifyName || cardName || '';
   const retry = opts._retry ?? 0;
-  if (verify && detailName && detailName !== verify && retry < 2) {
-    warn(`详情页姓名「${detailName}」与卡片「${verify}」不一致（疑似错位/竞态），关闭详情重试（第 ${retry + 1} 次）…`);
+  if (verify && detailName && detailName !== verify) {
+    if (retry < 2) {
+      warn(`详情页姓名「${detailName}」与卡片「${verify}」不一致（疑似错位/竞态），关闭详情重试（第 ${retry + 1} 次）…`);
+      try { await detailPage.close(); } catch { /* ignore */ }
+      await delay(1500 + Math.random() * 800);
+      return openCardDetail(browser, page, index, cardSelector, { throttle: opts.throttle, verifyName: opts.verifyName, _retry: retry + 1 });
+    }
+    // T107：错位重试耗尽——绝不能把他人详情交给调用方（后续 --hi 会作用到错误候选人）
+    warn(`详情页姓名「${detailName}」与卡片「${verify}」不一致（重试 2 次仍错位），放弃本次详情`);
     try { await detailPage.close(); } catch { /* ignore */ }
-    await delay(1500 + Math.random() * 800);
-    return openCardDetail(browser, page, index, cardSelector, { throttle: opts.throttle, verifyName: opts.verifyName, _retry: retry + 1 });
+    return null;
   }
   // 详情页未读到姓名（readCandidateDetail 失败/渲染慢）→ 不递归，直接返回当前结果（避免死锁）
   if (!detailName && verify) {

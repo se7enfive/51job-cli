@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 1 — 正确性与退出码契约 |
 | 优先级 | P0 |
-| 状态 | todo |
+| 状态 | done（2026-08-27，实机回归待批次） |
 | 依赖 | 无（T306 会进一步加固捕获机制，本任务先修语义） |
 | 验证 | 自动 + 实机 🧪 |
 
@@ -30,6 +30,14 @@
 - [ ] `recommend --inspect <姓名>` 输出中 `recommendName` 与详情 `name` 一致（实机 🧪 抽查 ≥3 人）
 - [ ] 模拟「无新 tab」场景（如临时禁用卡片点击）→ 命令快速失败且报错明确，不再空等 12s
 - [ ] `inspect` 输出永不为空对象 `{}` + 退出 0
+
+## 实施记录（2026-08-27）
+
+- `openCardDetail`：错位重试耗尽后关闭详情页并返回 `null`（原返回他人详情）；调用方 `recommend --inspect` 已有 `!opened → fail` 路径承接。
+- `index.ts` recommend `--inspect`：`openCardDetail` 调用补传 `verifyName: hits[idx-1]?.name`。
+- `openDetailByIndex`（candidate-detail.ts）：无新 tab → 直接 `return null`，不再回退读搜索列表页；`openTalentMgmtDetail`（talent-insight.ts）同语义修复（任务未明确列出，但为同一回退反模式，一并修）。
+- 输出侧兜底：recommend --inspect / inspect / talent-detail 三个命令在输出前校验 `detail.name`，缺姓名 = 提取不完整 → `fail`（消除「输出 {} + 退出 0」）。
+- `npm run build` 通过。错位场景与 verifyName 一致性抽查归实机批次。
 
 ## 注意事项
 

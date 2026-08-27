@@ -291,13 +291,16 @@ export async function openDetailByIndex(
   out(`已点击第 ${index} 张卡片，等待详情页…`);
 
   const target = await newTargetP;
-  let detailPage: Page;
-  if (target) {
-    const tp = await target.page();
-    detailPage = tp || page;
-  } else {
-    warn('未捕获到新 tab（10s），回退到搜索页本身');
-    detailPage = page;
+  if (!target) {
+    // T107：未捕获到详情 tab 时不能把搜索列表页当详情页读（空等 12s 返回空详情），
+    // 直接判失败，由调用方给出明确错误。
+    warn('未捕获到新 tab（10s）：站点可能未新开详情页，详情提取失败');
+    return null;
+  }
+  const detailPage = (await target.page()) || page;
+  if (detailPage === page) {
+    warn('新 tab 目标无效，详情提取失败');
+    return null;
   }
   await detailPage.bringToFront().catch(() => {});
   await delay(1800 + Math.random() * 800);
