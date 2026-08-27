@@ -1,4 +1,4 @@
-import type { Browser, Page, Target } from 'puppeteer-core';
+import type { Browser, Page } from 'puppeteer-core';
 import { assertNoRisk } from '../core/guard';
 import { delay, Throttle } from '../core/throttle';
 import { out, warn } from '../utils/output';
@@ -258,20 +258,11 @@ export async function openDetailByIndex(
     return null;
   }
 
-  // 监听新 tab
-  const newTargetP = new Promise<Target | null>((resolve) => {
-    const handler = (t: Target) => {
-      if (t.type() === 'page') {
-        browser.off('targetcreated', handler);
-        resolve(t);
-      }
-    };
-    browser.on('targetcreated', handler);
-    setTimeout(() => {
-      browser.off('targetcreated', handler);
-      resolve(null);
-    }, 10000);
-  });
+  // T306：记录点击前的 Page 对象集合——按对象身份而非 URL 判新页，
+  // 天然兼容「同一候选人同 URL 二次查看」场景；不依赖 targetcreated 事件（更稳）
+  const beforePages = new Set<Page>(
+    (await browser.pages().catch(() => [] as Page[])).filter((p) => !p.isClosed()),
+  );
 
   // 点击卡片 .detail 区域（跳详情）
   const clicked = await card
@@ -290,16 +281,27 @@ export async function openDetailByIndex(
   }
   out(`已点击第 ${index} 张卡片，等待详情页…`);
 
-  const target = await newTargetP;
-  if (!target) {
+  const deadline = Date.now() + 12000;
+  let detailPage: Page | null = null;
+  while (Date.now() < deadline) {
+    const pages = await browser.pages().catch(() => [] as Page[]);
+    for (const p of pages) {
+      if (p.isClosed() || beforePages.has(p)) continue;
+      let u = '';
+      try { u = p.url(); } catch { /* ignore */ }
+      if (u.includes('/resume/detail')) {
+        detailPage = p;
+        break;
+      }
+    }
+    if (detailPage) break;
+    await delay(400 + Math.random() * 300);
+  }
+
+  if (!detailPage) {
     // T107：未捕获到详情 tab 时不能把搜索列表页当详情页读（空等 12s 返回空详情），
     // 直接判失败，由调用方给出明确错误。
-    warn('未捕获到新 tab（10s）：站点可能未新开详情页，详情提取失败');
-    return null;
-  }
-  const detailPage = (await target.page()) || page;
-  if (detailPage === page) {
-    warn('新 tab 目标无效，详情提取失败');
+    warn('未捕获到详情 tab（12s）：站点可能未新开详情页，详情提取失败');
     return null;
   }
   await detailPage.bringToFront().catch(() => {});

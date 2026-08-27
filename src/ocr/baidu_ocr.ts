@@ -53,6 +53,8 @@ export async function getBaiduAccessToken(): Promise<string> {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
+    // T306：无超时的 fetch 会在半开连接上无限期挂起 preview 命令
+    signal: AbortSignal.timeout(30_000),
   });
 
   const data = (await res.json()) as {
@@ -95,6 +97,8 @@ export async function baiduOcrImageBase64(imageBase64: string): Promise<string> 
       Accept: 'application/json',
     },
     body: body.toString(),
+    // T306：同上；超时后调用方（preview）降级为保留截图、warn 提示，不算命令失败
+    signal: AbortSignal.timeout(30_000),
   });
 
   const data = (await res.json()) as {

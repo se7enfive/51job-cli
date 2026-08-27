@@ -1,4 +1,4 @@
-import type { Browser, Page, Target } from 'puppeteer-core';
+import type { Browser, Page } from 'puppeteer-core';
 import { assertNoRisk } from '../core/guard';
 import { delay, Throttle } from '../core/throttle';
 import { out, warn } from '../utils/output';
@@ -143,20 +143,11 @@ export async function openTalentMgmtDetail(
     return el;
   }).catch(() => null);
 
-  // 4. 监听新 tab（先挂监听再点击）
-  const newTargetP = new Promise<Target | null>((resolve) => {
-    const handler = (t: Target) => {
-      if (t.type() === 'page') {
-        browser.off('targetcreated', handler);
-        resolve(t);
-      }
-    };
-    browser.on('targetcreated', handler);
-    setTimeout(() => {
-      browser.off('targetcreated', handler);
-      resolve(null);
-    }, 10000);
-  });
+  // 4. 记录点击前的 Page 对象集合（T306：与 openDetailByIndex 同法——按对象身份判新页，
+  // 不依赖 targetcreated 事件，兼容同 URL 二次查看）
+  const beforePages = new Set<Page>(
+    (await browser.pages().catch(() => [] as Page[])).filter((p) => !p.isClosed()),
+  );
 
   // 5. 点击行内姓名（详情入口；同搜索卡片行为：点击新开 tab 到简历详情）
   const clicked = await replyBtn
@@ -180,16 +171,27 @@ export async function openTalentMgmtDetail(
   }
   out(`已点击「${name}」行，等待简历详情页…`);
 
-  // 6. 等新 tab 并读取
-  const target = await newTargetP;
-  if (!target) {
-    // T107：与 openDetailByIndex 同语义——无新 tab 判失败，不把人才管理页当详情页空读
-    warn('未捕获到新 tab（10s）：站点可能未新开详情页，详情提取失败');
-    return null;
+  // 6. 轮询等新详情 tab 并读取
+  const deadline = Date.now() + 12000;
+  let detailPage: Page | null = null;
+  while (Date.now() < deadline) {
+    const pages = await browser.pages().catch(() => [] as Page[]);
+    for (const p of pages) {
+      if (p.isClosed() || beforePages.has(p)) continue;
+      let u = '';
+      try { u = p.url(); } catch { /* ignore */ }
+      if (u.includes('/resume/detail')) {
+        detailPage = p;
+        break;
+      }
+    }
+    if (detailPage) break;
+    await delay(400 + Math.random() * 300);
   }
-  const detailPage = (await target.page()) || page;
-  if (detailPage === page) {
-    warn('新 tab 目标无效，详情提取失败');
+
+  if (!detailPage) {
+    // T107：与 openDetailByIndex 同语义——无新 tab 判失败，不把人才管理页当详情页空读
+    warn('未捕获到详情 tab（12s）：站点可能未新开详情页，详情提取失败');
     return null;
   }
   await detailPage.bringToFront().catch(() => {});
@@ -353,14 +355,10 @@ export async function openCardDetail(
     return { page: null, detail: null, viewLimited: limitPre };
   }
 
-  // 记录打开前的活动 tab URL（鉴别新开的详情 tab）
-  const beforeUrls = new Set<string>(
-    await browser
-      .pages()
-      .then((ps) => Promise.all(ps.map(async (p) => {
-        try { return await p.url(); } catch { return ''; }
-      })))
-      .then((urls) => urls.filter(Boolean)),
+  // 记录打开前的活动 tab（T306：按 Page 对象身份而非 URL——同 URL 二次查看同一位
+  // 候选人时，URL 基线会把新 tab 误判为旧页导致恒超时）
+  const beforePages = new Set<Page>(
+    (await browser.pages().catch(() => [] as Page[])).filter((p) => !p.isClosed()),
   );
 
   // 点击卡片 .detail 区域（跳详情）
@@ -395,8 +393,8 @@ export async function openCardDetail(
       if (p.isClosed()) continue;
       let u = '';
       try { u = await p.url(); } catch { /* ignore */ }
-      // 详情页 URL 含 /resume/detail，且不在打开前基线里（新开的）
-      if (u.includes('/resume/detail') && !beforeUrls.has(u)) {
+      // 详情页 URL 含 /resume/detail，且是点击前不存在的新 Page 对象（T306）
+      if (u.includes('/resume/detail') && !beforePages.has(p)) {
         detailPage = p;
         break;
       }

@@ -488,6 +488,24 @@ function ensurePageNavigationGuard(page: Page): void {
 
   const bounceAt: number[] = [];
   const commitAt = new Map<string, number[]>();
+  // T306：反弹导航串行化——fire-and-forget 的并发 goto 顺序未定义（恢复跳转与
+  // 验证页放行互相踩），上一次守卫导航未完成时丢弃新触发并记日志。
+  let navBusy = false;
+  const guardNavigate = (url: string, purpose: string, logFailure: boolean): void => {
+    if (navBusy) {
+      console.error(`[51job-cli] 上一次守卫导航未完成，丢弃${purpose}导航: ${url}`);
+      return;
+    }
+    navBusy = true;
+    void page
+      .goto(url, { waitUntil: 'load', timeout: 60_000 })
+      .catch(() => {
+        if (logFailure) console.error(`[51job-cli] 守卫导航失败：${purpose} ${url}`);
+      })
+      .finally(() => {
+        navBusy = false;
+      });
+  };
 
   const withinWindow = (stamps: number[], now: number, windowMs: number): number[] => {
     const kept = stamps.filter((t) => now - t <= windowMs);
@@ -526,17 +544,14 @@ function ensurePageNavigationGuard(page: Page): void {
         url,
         message: `检测到 51job 反复跳转风控/验证页（${url}），${RISK_BOUNCE_WINDOW_MS / 1000}s 内已 ${bounceAt.length} 次。已停止跳回首页并放行该页面：请在浏览器中完成验证/登录后重试；继续自动操作可能触发封号。`,
       });
-      void relaxRiskNavigationBlocking(page)
-        .then(() => page.goto(url, { waitUntil: 'load', timeout: 60_000 }))
-        .catch(() => {
-          /* 验证页本身加载失败不再重试，熔断状态已让命令层停下 */
-        });
+      void relaxRiskNavigationBlocking(page).then(() => {
+        // 验证页本身加载失败不再重试，熔断状态已让命令层停下
+        guardNavigate(url, '验证页放行', false);
+      });
       return;
     }
 
-    void page.goto(EHIRE_HOME, { waitUntil: 'load', timeout: 60_000 }).catch(() => {
-      console.error(`[51job-cli] 风险页导航恢复失败：${url}`);
-    });
+    guardNavigate(EHIRE_HOME, '风险页恢复', true);
   });
   pagesWithNavigationGuard.add(page);
 }

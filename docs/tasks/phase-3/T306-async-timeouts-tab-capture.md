@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 3 — 质量门禁与可靠性加固 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27，实机回归待批次） |
 | 依赖 | T107（身份校验语义先行） |
 | 验证 | 自动（可注入部分）+ 实机 🧪 |
 
@@ -33,6 +33,14 @@
 - [ ] 同一候选人连续两次 `recommend --inspect` → 两次都成功（🧪）
 - [ ] 捕获超时路径 < 12s 快速失败（T107 语义 + 本任务 timer 清理）
 - [ ] 触发一次风控反弹（或代码走查）确认无并发 goto
+
+## 实施记录（2026-08-27）
+
+- **OCR 超时**：baidu_ocr.ts 两处 fetch 加 `AbortSignal.timeout(30_000)`；chat.ts 现有 catch 已把 OCR 失败降级为「保留截图 + warn、命令不算失败」，语义符合预期。
+- **详情 tab 捕获统一为 `browser.pages()` 轮询**（`openDetailByIndex`、`openTalentMgmtDetail` 从 targetcreated 监听迁移）：URL 含 `/resume/detail` 过滤 + 12s 窗口 + 超时判失败（T107 语义）；targetcreated 的「广告 tab 误命中 / timer 未清理」问题随之消失，`Target` 类型导入一并清理。
+- **`openCardDetail` 基线改 Page 对象集合**（原 URL 集合）：同一候选人同 URL 二次查看不再恒超时。
+- **风控反弹导航串行化**（pageGuards.ts）：`guardNavigate` 带 `navBusy` 标志，上一次守卫 goto 未完成时丢弃新触发并记日志；验证页放行/恢复跳转两处接入。
+- `npm run build` 通过；OCR 超时注入用例与同 URL 二次查看实机回归分别归 T301/实机批次。
 
 ## 注意事项
 
