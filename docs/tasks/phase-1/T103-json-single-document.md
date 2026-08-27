@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 1 — 正确性与退出码契约 |
 | 优先级 | P0 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | T101（fail 异常化保证 flush）、T102（outcome 映射） |
 | 验证 | 自动 + 管道实机 |
 
@@ -34,6 +34,15 @@
 - [ ] `recommend <岗位> --greet <姓名> --json` 失败时退出 1 且 stdout 可解析
 - [ ] `talent-detail <姓名> --hi --json` 失败时退出 1 且 stdout 可解析
 - [ ] 纯读命令（list/search/positions/recommend 列表）行为不回归
+
+## 实施记录（2026-08-27）
+
+- **中心化修复**：`output.ts` 的 `out()` 在 `--json` 模式改道 stderr（`[info]` 前缀），`printJson()` 直接写 stdout——一次性解决全仓「过程消息污染 JSON stdout」问题（含 greet --json 的「已点击第 N 张卡片」等未守卫 out 调用）。
+- `greetTalent` 重构为返回 `GreetResult { outcome, detail? }`，不再自行 printJson；text 模式摘要仍在函数内打印。命令层把 `detail` 并入单文档 `{...detail, hiResult, target}`。
+- `inspect --hi` / `talent-detail --hi`：hi 结果以 `hiResult`/`error` 字段并入详情文档，最后一次性输出，输出后统一 `fail`。
+- `recommend --greet` / `recommend --inspect`(view_limit)：失败路径 JSON 补 `error` 字段（与 stderr ✖ 同源）。
+- 协议冒烟验证通过：json 模式 stdout 仅一条可解析文档、过程消息落在 stderr。
+- 待实机回归：`inspect <姓名> --hi --json` 全链路（归实机批次）。
 
 ## 注意事项
 

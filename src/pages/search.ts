@@ -1,10 +1,10 @@
 import type { Browser, Page } from 'puppeteer-core';
 import { assertNoRisk } from '../core/guard';
 import { delay, Throttle } from '../core/throttle';
-import { out, warn, Row, getFormat, printJson } from '../utils/output';
+import { out, warn, Row, getFormat } from '../utils/output';
 import { confirmAction } from '../utils/confirm';
 import { trackExtraPage } from '../core/sessionPage';
-import { openDetailByIndex, detailToSummary, hiChatOnDetail } from './candidate-detail';
+import { openDetailByIndex, detailToSummary, hiChatOnDetail, CandidateDetail } from './candidate-detail';
 import { detectHiResult, HiOutcome } from './hi-result';
 import { selectors } from './selectors';
 
@@ -580,13 +580,22 @@ export async function locateCandidate(
 }
 
 /**
+ * greetTalent 结果：outcome + 详情管线拿到的简历详情。
+ * JSON 模式下命令层把 detail 并入最终单文档输出（T103），本函数不再自行 printJson。
+ */
+export interface GreetResult {
+  outcome: HiOutcome;
+  detail?: CandidateDetail;
+}
+
+/**
  * 对候选人打招呼（支持「先看详情再 Hi」）。
  * - 定位：`opts.index`（列表序号，1-based）或 `name`（文本匹配）
  * - 前置筛选：`opts.filters` 复用 search 的 13 维筛选
  * - 详情管线（传入 browser 时）：开详情 → 摘要 → 人机确认 → 详情页 Hi
  *   - `browser` 为空时回退旧路径：卡片「立即Hi聊」一键
  * - `--dry-run`：只看详情 + 摘要，不 Hi（返回 dry_run）
- * @returns HiOutcome（success / quota_exhausted / failed / unknown / dry_run / cancelled）
+ * @returns GreetResult（outcome：success / quota_exhausted / failed / unknown / dry_run / cancelled）
  */
 export async function greetTalent(
   page: Page,
@@ -600,7 +609,7 @@ export async function greetTalent(
     confirm?: boolean;
     browser?: Browser;
   } = {}
-): Promise<HiOutcome> {
+): Promise<GreetResult> {
   await assertNoRisk(page, { action: `对 ${name || `第${opts.index}位候选人`} 打招呼`, soft: false });
   const throttle = opts.throttle;
   if (throttle) await throttle.wait();
@@ -609,32 +618,30 @@ export async function greetTalent(
   const got = await ensureSearchPool(page, opts.job || name, { throttle, filters: opts.filters });
   if (!got) {
     warn(`搜索「${opts.job || name}」无结果，请调整关键词或筛选后重试。`);
-    return 'failed';
+    return { outcome: 'failed' };
   }
 
   // 1) 定位卡片
   const idx = await locateCandidate(page, { name, index: opts.index });
-  if (!idx) return 'failed';
+  if (!idx) return { outcome: 'failed' };
 
   // 2) 详情管线（有 browser 时）：开详情 → 展示 → 决策 → Hi
   if (opts.browser) {
     const opened = await openDetailByIndex(opts.browser, page, idx, { throttle });
     if (!opened) {
       warn('详情页打开或提取失败');
-      return 'failed';
+      return { outcome: 'failed' };
     }
     const { page: detailPage, detail } = opened;
     trackExtraPage(detailPage); // 统一清理详情 tab
-    // 摘要输出
-    if (getFormat() === 'json') {
-      printJson(detail);
-    } else {
+    // 摘要输出：text 模式在此打印；JSON 模式的详情由命令层并入单文档结果（T103）
+    if (getFormat() !== 'json') {
       out(detailToSummary(detail));
     }
     // 决策
     if (opts.dryRun) {
       out('--dry-run：已查看详情，未发出打招呼');
-      return 'dry_run';
+      return { outcome: 'dry_run', detail };
     }
     const targetName = detail.name || name || `候选人${idx}`;
     const yes = opts.confirm !== false
@@ -642,9 +649,9 @@ export async function greetTalent(
       : true;
     if (!yes) {
       out(`已跳过「${targetName}」，未打招呼`);
-      return 'cancelled';
+      return { outcome: 'cancelled', detail };
     }
-    return hiChatOnDetail(detailPage, { throttle });
+    return { outcome: await hiChatOnDetail(detailPage, { throttle }), detail };
   }
 
   // 3) 无 browser：旧路径，列表卡片内「立即Hi聊」直接点 + 结果校验
@@ -663,8 +670,8 @@ export async function greetTalent(
     .catch(() => false);
   if (clicked) {
     out(`已点击「${name || `第${idx}位候选人`}」的「立即Hi聊」，校验结果…`);
-    return detectHiResult(page, { btnText: `${s.resultList} ${s.resultItem} button` });
+    return { outcome: await detectHiResult(page, { btnText: `${s.resultList} ${s.resultItem} button` }) };
   }
   warn('已在列表中定位到候选人，但未找到「立即Hi聊」按钮');
-  return 'failed';
+  return { outcome: 'failed' };
 }

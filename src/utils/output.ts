@@ -56,10 +56,18 @@ export function printTable(rows: Row[]): void {
 }
 
 export function printJson(obj: unknown): void {
-  out(JSON.stringify(obj, null, 2));
+  // JSON 协议（T103）：stdout 只允许「最终结果文档」从这条路输出——
+  // 不经 out()，避免在 --json 模式下被改道 stderr。
+  process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
 }
 
 export function out(msg: string): void {
+  // --json 模式下 stdout 恒为单个可 JSON.parse 的结果文档（printJson 输出）；
+  // out() 视为过程消息，改道 stderr（[info] 前缀），过程进度不再污染 stdout。
+  if (format === 'json') {
+    process.stderr.write('[info] ' + msg + '\n');
+    return;
+  }
   process.stdout.write(msg + '\n');
 }
 
