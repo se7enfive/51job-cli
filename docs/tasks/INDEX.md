@@ -53,7 +53,7 @@
 | T401 | 环境变量统一（命名与优先级） | P2 | 无 | core/browser.ts、ocr/baidu_ocr.ts | done |
 | T402 | `.env.example` 修正 | P2 | T202、T205、T401 | .env.example | done |
 | T403 | README / CAPABILITIES / AGENTS / RELEASE 同步 | P2 | 多数任务后 | README.md、docs/CAPABILITIES.md、AGENTS.md、RELEASE.md | todo |
-| T404 | 仓库卫生（LICENSE / lockfile / main / CHANGELOG） | P2 | 无 | LICENSE、package.json、package-lock.json | todo |
+| T404 | 仓库卫生（LICENSE / lockfile / main / CHANGELOG） | P2 | 无 | LICENSE、package.json、package-lock.json | done |
 
 ## 建议执行批次
 

@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 4 — 文档与配置对齐 |
 | 优先级 | P2 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无（随时可做） |
 | 验证 | 自动（npm pack / npm ci） |
 
@@ -30,6 +30,14 @@
 - [ ] `require('51job-cli')` 不再执行 CLI（无 main 或 main 指向无害入口）
 - [ ] `npm pack --dry-run` 内容清单符合预期
 - [ ] CHANGELOG 记录截至当前所有已完成任务的行为变更
+
+## 实施记录（2026-08-27）
+
+- 替换 `LICENSE` 为 GNU GPL-3.0 官方原文（curl 获取 35k 版）。
+- 移除 `package.json` 的 `main: dist/index.js`（纯 CLI 包无需可引入的程序入口，防止 `require` 侧漏执行），保留 `bin`。
+- `package-lock.json`：用 `npm install --registry=https://registry.npmjs.org --package-lock-only` 重锁，消除 `npmmirror.com` 镜像 URL。
+- 新建 `CHANGELOG.md`：以 `0.1.1 (Unreleased)` 版本统筹了 T101 到 T401 迄今为止所有显著的影响编排层行为的变化。
+- grep 确认无依赖 `require('51job-cli')` 的调用。
 
 ## 注意事项
 
