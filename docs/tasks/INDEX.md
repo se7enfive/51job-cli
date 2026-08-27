@@ -43,7 +43,7 @@
 | T204 | 会话锁不再记录完整命令行 | P1 | 无 | core/sessionLock.ts | done |
 | T205 | cwd `.env` 加载策略收敛 | P1 | 无 | index.ts | done |
 | T301 | Vitest 单元测试基线 | P1 | T102/T103/T105（映射类用例） | package.json、test/（新增） | done |
-| T302 | CI 门禁与发布流程修复 | P1 | T301 | .github/workflows/*、package.json | todo |
+| T302 | CI 门禁与发布流程修复 | P1 | T301 | .github/workflows/*、package.json | done |
 | T303 | smoke 冒烟测试隔离化 | P2 | 无 | scripts/smoke-*、core/state.ts、utils/store.ts | done |
 | T304 | 脚本归档与死代码清理 | P2 | 无 | scripts/*、多个 src 文件 | todo |
 | T305 | availability 网络失败缓存修复 | P1 | 无 | core/availability.ts | done |

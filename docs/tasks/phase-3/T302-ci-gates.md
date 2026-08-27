@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 3 — 质量门禁与可靠性加固 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27，workflow 运行效果待首次 push/tag 验证） |
 | 依赖 | T301（npm test 存在） |
 | 验证 | 推送后看 GitHub Actions 实际运行 |
 
@@ -33,6 +33,13 @@
 - [ ] 开 PR / 推 main → ci.yml 跑 typecheck+build+test
 - [ ] workflow_dispatch 传非法 version → 快速失败并有明确提示
 - [ ] 无 `NPM_TOKEN` secret 的 fork 环境流程不红（现有 npm_gate 保持）
+
+## 实施记录（2026-08-27）
+
+- **tag-publish.yml**：移除 `release: published` 触发（双跑根因）；移除 `id-token: write`；`workflow_dispatch` version 输入加 semver 校验（独立步骤，不匹配 fail + `::error::` 注释）；发布前显式跑 `npm run typecheck && npm test`；publish 步骤加 `--ignore-scripts`（前置步骤已跑过门禁，避免 prepublishOnly 重复执行）。
+- **新增 ci.yml**：push(main) + pull_request → `npm ci` → typecheck → build → test（node 22，concurrency 取消同 ref 旧运行）。
+- **package.json**：`prepublishOnly` = typecheck + test + build（本地手发门禁；CI 用 `--ignore-scripts` 规避重复）。
+- YAML 语法经 js-yaml 校验通过；workflow 实际运行效果待下次 push/tag 观察（验收项待线上确认）。
 
 ## 注意事项
 

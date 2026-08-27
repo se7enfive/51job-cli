@@ -1,11 +1,12 @@
 name: tag-publish
 
+# T302：只保留 tag push 与手动触发两条发布路径。
+# 原 `release: published` 触发会在 tag push 流程 `gh release create` 后二次运行、
+# 二次 publish 必然版本冲突失败（每次发版留一个红叉），已移除。
 on:
   push:
     tags:
       - 'v*'
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -13,9 +14,9 @@ on:
         required: false
         type: string
 
+# T302：id-token 未使用（发布走 NPM_TOKEN），移除以缩小凭据面
 permissions:
   contents: write
-  id-token: write
 
 concurrency:
   group: npm-publish-${{ github.ref_name || github.event.inputs.version || github.run_id }}
@@ -40,6 +41,15 @@ jobs:
           else
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "NPM_TOKEN secret is missing; skipping publish."
+          fi
+
+      - name: Validate version input
+        if: ${{ steps.npm_gate.outputs.publish == 'true' && github.event.inputs.version != '' }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "${{ github.event.inputs.version }}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::error::version 输入需为合法 semver（不含前导 v），收到: ${{ github.event.inputs.version }}"
+            exit 1
           fi
 
       - name: Setup Node
@@ -67,6 +77,12 @@ jobs:
         if: ${{ steps.npm_gate.outputs.publish == 'true' }}
         run: npm ci
 
+      - name: Typecheck & Test
+        if: ${{ steps.npm_gate.outputs.publish == 'true' }}
+        run: |
+          npm run typecheck
+          npm test
+
       - name: Build
         if: ${{ steps.npm_gate.outputs.publish == 'true' }}
         run: npm run build
@@ -81,9 +97,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          # --ignore-scripts：typecheck/test/build 已在上方步骤显式执行过，
+          # 跳过 prepublishOnly 避免重复跑（本地 npm publish 仍会走 prepublishOnly 门禁）
           target="${{ steps.version.outputs.target }}"
           npm version --no-git-tag-version "$target"
-          npm publish --access public
+          npm publish --access public --ignore-scripts
 
       - name: Create GitHub Release (tag push only)
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.npm_gate.outputs.publish == 'true' }}
