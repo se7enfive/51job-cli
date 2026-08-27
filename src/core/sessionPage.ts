@@ -197,10 +197,12 @@ export async function withSessionPage<T>(
       );
     };
 
+    // T108 重试边界：只有「进入回调之前」的 setup 阶段（起浏览器/选页/装守卫/导航/
+    // 熔断检查）才允许因 context destroyed 重试。回调可能已执行对外写操作
+    // （send/greet/action），整体重跑 = 重复发消息/重复点击，绝不自动重试。
     const maxAttempts = 2;
-    let lastErr: unknown;
+    let page: Page | null = null;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      let page: Page | null = null;
       try {
         browserRef = await ensureBrowser();
         page = pageRef;
@@ -219,10 +221,8 @@ export async function withSessionPage<T>(
           await ensureEhireUrl(page);
         }
         assertNoPageRisk(page);
-
-        return await callback(page);
+        break;
       } catch (e) {
-        lastErr = e;
         // 守卫熔断时，把「上下文被销毁」这类次生错误换成风控原因，并且不再重试。
         if (page && !(e instanceof PageRiskError)) {
           assertNoPageRisk(page);
@@ -234,7 +234,17 @@ export async function withSessionPage<T>(
         throw e;
       }
     }
-    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+
+    // 回调错误不重试（T108）：写操作可能已生效。仍做一次风控检查，
+    // 把「回调期间跳到风控页」的次生错误换成风控原因后抛出。
+    try {
+      return await callback(page!);
+    } catch (e) {
+      if (page && !(e instanceof PageRiskError)) {
+        assertNoPageRisk(page);
+      }
+      throw e;
+    }
   });
 }
 

@@ -258,13 +258,31 @@ export async function sendMessage(
     return !rem.includes(text.slice(0, 10));
   };
 
+  // T108 防重发护栏：补发前先读聊天区已有消息，确认首击确实未出现在会话记录中才补发。
+  // 首击可能已实际发出（IM SDK 输入状态同步偶发慢导致输入框清空校验误报），
+  // 盲目补发 = 同一消息发两遍。用消息前 10 字符在 messages 节点中查找。
+  const messageAlreadyVisible = async (): Promise<boolean> => {
+    const probe = text.slice(0, 10);
+    const panelText = await page
+      .evaluate((sel) => Array.from(document.querySelectorAll(sel)).map((n) => n.textContent || '').join('\n'), s.messages)
+      .catch(() => '');
+    return !!panelText && panelText.includes(probe);
+  };
+
   const clicked = await clickVisibleSend();
   if (!clicked) {
     await input.press('Enter');
   }
   await delay(1500);
   if (!(await inputCleared())) {
-    // 首击未生效（IM SDK 输入状态同步偶发慢）：重新聚焦后再补一次真实点击，Enter 兜底
+    if (await messageAlreadyVisible()) {
+      // 首击已生效（输入框清空校验误报）：按已发送处理，不补发
+      warn('输入框未清空但会话记录已含该消息，按已发送处理（不补发）。');
+      out(`消息已发送: ${text.length > 50 ? text.slice(0, 50) + '…' : text}`);
+      return true;
+    }
+    // 首击未生效（IM SDK 输入状态同步偶发慢）：重新聚焦后再补一次真实点击，Enter 兜底。
+    // T108：补发最多 1 次。
     await input.click().catch(() => {});
     await delay(600);
     if (!(await clickVisibleSend())) {
@@ -272,8 +290,14 @@ export async function sendMessage(
     }
     await delay(1500);
     if (!(await inputCleared())) {
-      await input.press('Enter');
-      await delay(1500);
+      if (await messageAlreadyVisible()) {
+        warn('输入框未清空但会话记录已含该消息，按已发送处理。');
+        out(`消息已发送: ${text.length > 50 ? text.slice(0, 50) + '…' : text}`);
+        return true;
+      }
+      // T108：无法确认是否发出时不再继续补发（宁失败不重复），交人工检查
+      warn('补发后输入框仍未清空且会话记录未见消息，不再继续补发，请人工检查沟通面板。');
+      return false;
     }
   }
 
