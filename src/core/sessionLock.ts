@@ -17,10 +17,10 @@ type SessionLockMeta = {
   command: string;
 };
 
-/** 脱敏命令摘要：丢弃全部选项与参数值，仅保留脚本文件名与子命令名。 */
-function sanitizedCommand(): string {
-  const script = basename(process.argv[1] ?? '51job');
-  const sub = process.argv[2] && !process.argv[2].startsWith('-') ? ` ${process.argv[2]}` : '';
+/** 脱敏命令摘要：丢弃全部选项与参数值，仅保留脚本文件名与子命令名。argv 可注入供测试。 */
+export function sanitizedCommand(argv: string[] = process.argv): string {
+  const script = basename(argv[1] ?? '51job');
+  const sub = argv[2] && !argv[2].startsWith('-') ? ` ${argv[2]}` : '';
   return `${script}${sub}`;
 }
 

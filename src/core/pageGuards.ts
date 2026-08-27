@@ -38,8 +38,8 @@ function shouldAllowRiskNav(): boolean {
          process.env['51JOB_BROWSER_ALLOW_RISK_NAV'] === '1';
 }
 
-/** 从环境变量读取逗号分隔的 URL pattern 列表（空白则用默认值） */
-function parsePatternList(envKey: string, defaults: readonly string[]): string[] {
+/** 从环境变量读取逗号分隔的 URL pattern 列表（空白则用默认值）。导出供测试与 probe 校准。 */
+export function parsePatternList(envKey: string, defaults: readonly string[]): string[] {
   const raw = process.env[envKey]?.trim();
   if (!raw) return [...defaults];
   return raw
@@ -89,7 +89,8 @@ const REPORT_REQUEST_RE = new RegExp(
 );
 
 const RISK_NAVIGATION_RE = new RegExp(
-  `about:blank|/(?:${RISK_NAV_KEYWORDS.join('|')})(?:/|\\.|$)|[?&](?:${RISK_NAV_KEYWORDS.join('|')})=`,
+  // 路径分隔符含 - _：security-check / risk_check 等连字符命名同样拦截（T301 用例发现）
+  `about:blank|/(?:${RISK_NAV_KEYWORDS.join('|')})(?:/|\\.|-|_|$)|[?&](?:${RISK_NAV_KEYWORDS.join('|')})=`,
   'i',
 );
 
@@ -121,6 +122,8 @@ function classifyPausedRequest(url: string): PausedKind {
   // 一旦后续新增 patterns 但忘记同步分类正则，调用方能立刻发现而不是被静默归错类。
   return 'security_script';
 }
+/** 导出供单元测试（T301） */
+export { classifyPausedRequest };
 
 function previewPostData(raw: string | undefined): string {
   if (!raw) return '';

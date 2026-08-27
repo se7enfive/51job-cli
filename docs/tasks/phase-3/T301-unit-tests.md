@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 3 — 质量门禁与可靠性加固 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | T102/T103/T105 完成后补「映射/协议」类用例；纯逻辑用例可随时先行 |
 | 验证 | 自动 |
 
@@ -42,6 +42,16 @@
 - [ ] 上表所列模块每个至少 1 个直接用例
 - [ ] `npm run build` 产物（dist/）不含 test 文件
 - [ ] CI 集成准备就绪（T302 直接引用 `npm test`）
+
+## 实施记录（2026-08-27）
+
+- vitest ^4.1.11（devDep）；`npm test` = `vitest run`，`npm run typecheck` = `tsc --noEmit`；测试在 `test/*.test.ts`（不进 build 产物，tsconfig include 保持 `src/**`）。
+- 为可测性导出：`parsePatternList`/`classifyPausedRequest`（pageGuards）、`stillInitial`（hi-result）、`displayWidth`/`truncateDisplay`（output）、`sanitizedCommand`（sessionLock，加 argv 注入参数）。
+- 首批 6 个文件 51 用例：throttle（含 `800-2000` 现状断言）、pageGuards（URL 判定/三分类/pattern 解析）、output（宽度/截断/表格对齐）、hi-result（stillInitial）、sessionLock（脱敏）、resume-ocr（opt-in 矩阵）。
+- **测试立即抓到两个真实缺陷并修复**：
+  1. `stillInitial` 朴素 includes——「已Hi聊」「已沟通」等成功后文案包含短词「Hi聊」「沟通」，会把成功态误判为初始态（Hi 成功永远检测不出）；改为前缀正则 + 精确短词匹配；
+  2. `RISK_NAVIGATION_RE` 路径分隔符缺 `-`/`_`——`security-check` 类风控路径漏拦。
+- 51/51 通过；build + typecheck 干净。
 
 ## 注意事项
 

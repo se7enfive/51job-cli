@@ -14,8 +14,22 @@ import { selectors } from './selectors';
  */
 export type HiOutcome = 'success' | 'quota_exhausted' | 'failed' | 'unknown' | 'dry_run' | 'cancelled';
 
-/** Hi 按钮初始文案集合：任一出现在按钮上即视为「还未发出去」 */
-const HI_BTN_INITIAL_TEXTS = ['立即Hi聊', '立即沟通', '立即联系', '立即聊', 'Hi聊', '沟通'];
+/** Hi 按钮初始文案：前缀类（立即Hi聊/立即沟通/立即联系/立即聊） */
+const HI_BTN_INITIAL_PREFIX_RE = /^立即(?:Hi聊|沟通|联系|聊)/;
+/** Hi 按钮初始文案：完整短词类 */
+const HI_BTN_INITIAL_EXACT = ['Hi聊', '沟通'];
+
+/** 任一文本仍为初始态即视为「还未发出去」。导出供单元测试（T301）。
+ * 注意：不能做朴素 includes——「已Hi聊」「已沟通」等成功后文案包含短词
+ * 「Hi聊」「沟通」，朴素包含会把成功态误判为初始态（成功永远检测不到）。 */
+export function stillInitial(texts: string[]): boolean {
+  return texts.some((t) => {
+    const s = t.trim();
+    if (!s) return false;
+    if (HI_BTN_INITIAL_PREFIX_RE.test(s)) return true;
+    return HI_BTN_INITIAL_EXACT.includes(s);
+  });
+}
 
 /** 额度不足弹窗特征文案 */
 const QUOTA_TEXT_PATTERNS: RegExp[] = [
@@ -117,10 +131,6 @@ async function btnTextsInCard(page: Page, cardSelector: string, cardIndex: numbe
       return els.map((e) => ((e as HTMLElement).textContent || '').trim()).filter((t) => t.length > 0);
     }, cardSelector, cardIndex)
     .catch(() => null);
-}
-
-function stillInitial(texts: string[]): boolean {
-  return texts.some((t) => HI_BTN_INITIAL_TEXTS.some((it) => t.includes(it)));
 }
 
 /**

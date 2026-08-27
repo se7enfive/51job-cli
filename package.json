@@ -20,6 +20,8 @@
     "dev": "npm run build && node dist/index.js",
     "start": "node dist/index.js",
     "watch": "tsc -w",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "smoke": "npm run build && node scripts/smoke-puppeteer.cjs && node scripts/smoke-guards.cjs"
   },
   "dependencies": {
@@ -29,7 +31,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "51job",

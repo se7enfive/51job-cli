@@ -19,7 +19,8 @@ function pad(s: string, width: number): string {
   return s + ' '.repeat(width - s.length);
 }
 
-function displayWidth(s: string): number {
+/** 字符显示宽度（CJK/全角记 2）。导出供单元测试（T301）。 */
+export function displayWidth(s: string): number {
   let w = 0;
   for (const ch of s) {
     w += /[\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/.test(ch) ? 2 : 1;
@@ -33,8 +34,8 @@ function padDisplay(s: string, width: number): string {
   return s + ' '.repeat(width - w);
 }
 
-/** 超宽单元格截断加省略号（T110）：保证列宽 ≤ 上限，表格不再因长字段错位 */
-function truncateDisplay(s: string, maxWidth: number): string {
+/** 超宽单元格截断加省略号（T110）：保证列宽 ≤ 上限，表格不再因长字段错位。导出供测试。 */
+export function truncateDisplay(s: string, maxWidth: number): string {
   if (displayWidth(s) <= maxWidth) return s;
   let out = '';
   let w = 0;
