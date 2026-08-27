@@ -2,7 +2,7 @@ import type { Page } from 'puppeteer-core';
 import { EHIRE_HOME } from '../core/browser';
 import { checkRisk } from '../core/guard';
 import { delay } from '../core/throttle';
-import { out, err, warn } from '../utils/output';
+import { out, warn } from '../utils/output';
 import { selectors } from './selectors';
 
 // 登录页域名：停留在此域 = 未登录。注意 ehire.51job.com 本身就是登录后的工作台域，
@@ -73,7 +73,7 @@ export async function waitForLogin(page: Page, opts: { timeoutSec?: number } = {
     await delay(2000);
   }
 
-  err(`等待登录超时（${timeoutSec}s）。请确认浏览器中已完成登录后重新运行命令。`);
+  // 超时只通过返回值表达（ok:false）；错误提示由命令层统一输出，避免双份日志
   return { ok: false, url: page.url(), waitedSeconds: Math.round((Date.now() - start) / 1000) };
 }
 

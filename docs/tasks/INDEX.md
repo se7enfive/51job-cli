@@ -30,7 +30,7 @@
 | T101 | `fail()` 异常化退出（基础机制） | P0 | 无 | utils/output.ts、index.ts | done |
 | T102 | `greet` 退出码与结果类型修正 | P0 | T101 | index.ts、pages/search.ts、pages/hi-result.ts | done |
 | T103 | JSON 输出协议：单文档 + 统一退出码 | P0 | T101、T102 | index.ts | done |
-| T104 | `wait-login` 超时退出码与参数校验 | P0 | T101 | index.ts、pages/login.ts | todo |
+| T104 | `wait-login` 超时退出码与参数校验 | P0 | T101 | index.ts、pages/login.ts | done |
 | T105 | `list`/`chat` 序号空间一致性 | P0 | 无 | pages/inbox.ts、pages/chat.ts、index.ts | todo |
 | T106 | Hi 结果判定收敛到被点击卡片 | P0 | 无 | pages/hi-result.ts、pages/recommend.ts、pages/search.ts | todo |
 | T107 | 详情页身份校验与错位防护 | P0 | 无 | pages/talent-insight.ts、pages/candidate-detail.ts、index.ts | todo |

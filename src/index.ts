@@ -121,8 +121,18 @@ program
   .description('等待登录完成（轮询检测，配合 login 使用）')
   .option('--timeout <秒>', '等待登录超时秒数', '300')
   .action(async (opts) => {
+    // 参数校验（T104）：非法值（abc → NaN、0、负数）会让轮询循环立即超时假结束，
+    // 在进入浏览器会话前直接报错。
+    const sec = parseInt(opts.timeout, 10);
+    if (!Number.isFinite(sec) || sec <= 0) {
+      fail(`--timeout 需为正整数秒，收到: "${opts.timeout}"（示例: 51job wait-login --timeout 300）`);
+    }
     await runCommand(async (page) => {
-      await waitForLogin(page, { timeoutSec: parseInt(opts.timeout, 10) });
+      // 退出码契约（T104）：超时非零退出，编排层据此区分「登录成功」与「等待超时」
+      const r = await waitForLogin(page, { timeoutSec: sec });
+      if (!r.ok) {
+        fail(`等待登录超时（${sec}s）。请在浏览器中完成登录后重试 wait-login，或直接运行业务命令检测登录态。`);
+      }
     });
   });
 
