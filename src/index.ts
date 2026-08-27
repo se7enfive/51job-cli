@@ -273,6 +273,7 @@ program
       }
       if (opts.greet) {
         // 打招呼模式：定位 → 列表内 Hi → 校验真实结果
+        // 退出码契约（T102）：success → 0；quota_exhausted/failed/unknown → 1（JSON 模式同样非零）
         const outcome = await greetRecommend(page, opts.greet, { throttle });
         if (outcome === 'quota_exhausted') {
           // 额度不足：JSON 也输出结果，但必须非零退出（AI 编排依赖退出码判断「该停」）
@@ -281,6 +282,9 @@ program
         }
         if (getFormat() === 'json') {
           printJson({ hiResult: hiOutcomeTag(outcome), target: opts.greet });
+          if (outcome !== 'success') {
+            fail(`打招呼未确认成功（${hiOutcomeTag(outcome)}）: ${opts.greet}`);
+          }
         } else if (outcome === 'success') {
           out(`已对「${opts.greet}」打招呼成功`);
         } else {
@@ -315,7 +319,9 @@ greetCmd.action(async (name, opts) => {
   await runCommand(async (page) => {
     const bid = await getBrowserRef();
     if (!bid) fail('浏览器未就绪');
-    const ok = await greetTalent(page, name || '', {
+    // 退出码契约（T102）：success/dry_run/cancelled → 0（dry_run/cancelled 是「正常未发出」，
+    // 绝不能非零退出）；quota_exhausted/failed/unknown → 1。JSON 模式先输出 hiResult 再 fail。
+    const outcome = await greetTalent(page, name || '', {
       job: opts.job,
       throttle,
       filters: filtersFromOpts(opts),
@@ -324,7 +330,23 @@ greetCmd.action(async (name, opts) => {
       confirm: opts.confirm, // commander --no-confirm -> opts.confirm === false
       browser: bid,
     });
-    if (!ok) fail(`打招呼未确认成功: ${name || `第${opts.byIndex}位候选人`}`);
+    const target = name || `第${opts.byIndex}位候选人`;
+    if (outcome === 'quota_exhausted') {
+      if (getFormat() === 'json') printJson({ hiResult: hiOutcomeTag(outcome), target });
+      fail('Hi聊点数不足：本次未发出，请分配额度后再跑（已自动关闭弹窗，不重试）');
+    }
+    if (getFormat() === 'json') {
+      printJson({ hiResult: hiOutcomeTag(outcome), target });
+      if (outcome !== 'success' && outcome !== 'dry_run' && outcome !== 'cancelled') {
+        fail(`打招呼未确认成功（${hiOutcomeTag(outcome)}）: ${target}`);
+      }
+    } else if (outcome === 'success') {
+      out(`已对「${target}」打招呼成功`);
+    } else if (outcome === 'dry_run' || outcome === 'cancelled') {
+      // 未发出提示已由 greetTalent 输出（摘要/跳过文案），命令层正常结束
+    } else {
+      fail(`打招呼未确认成功（${hiOutcomeTag(outcome)}）: ${target}`);
+    }
   });
 });
 
@@ -386,7 +408,7 @@ program
         out(detailToSummary(d));
       }
 
-      // 可选 --hi（校验真实结果）
+      // 可选 --hi（校验真实结果；退出码契约同 T102：failed/unknown 在 JSON 模式同样非零退出）
       if (opts.hi) {
         const outcome = await hiChatOnDetail(opened.page, { throttle });
         if (outcome === 'quota_exhausted') {
@@ -395,6 +417,7 @@ program
         }
         if (getFormat() === 'json') {
           printJson({ ...d, hiResult: hiOutcomeTag(outcome) });
+          if (outcome !== 'success') fail(`详情页打招呼未成功（${hiOutcomeTag(outcome)}）`);
         } else if (outcome === 'success') {
           out('详情页「立即Hi聊」已成功');
         } else {
@@ -428,10 +451,12 @@ program
       }
 
       // 可选 --hi（人才管理来源 = 「回复」，免费不耗点数；校验真实结果）
+      // 退出码契约：success → 0；none → 0（无按钮=可能已回复过，非失败）；failed → 1（JSON 模式同样）
       if (opts.hi) {
         const outcome = await replyOnDetail(opened.page, { throttle });
         if (getFormat() === 'json') {
           printJson({ ...d, hiResult: outcome === 'success' ? 'reply_ok' : outcome, chanSource: 'delivery' });
+          if (outcome === 'failed') fail(`详情页「回复」未确认成功（${outcome}），请人工检查`);
         } else if (outcome === 'success') {
           out('详情页「回复」已成功（免费，不耗点数）');
         } else if (outcome === 'none') {

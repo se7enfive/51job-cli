@@ -9,8 +9,10 @@ import { selectors } from './selectors';
  * - quota_exhausted: 额度不足弹窗（Hi 未发出；弹窗需手动关闭，已自动点关闭）
  * - failed: 明确失败（按钮原样 + 出现失败类弹窗）
  * - unknown: 超时无信号，保守按未成功处理
+ * - dry_run: --dry-run 查看详情后主动结束（正常流程，未发出，命令退出码 0）
+ * - cancelled: 用户在 Y/N 确认时跳过（正常流程，未发出，命令退出码 0）
  */
-export type HiOutcome = 'success' | 'quota_exhausted' | 'failed' | 'unknown';
+export type HiOutcome = 'success' | 'quota_exhausted' | 'failed' | 'unknown' | 'dry_run' | 'cancelled';
 
 /** Hi 按钮初始文案集合：任一出现在按钮上即视为「还未发出去」 */
 const HI_BTN_INITIAL_TEXTS = ['立即Hi聊', '立即沟通', '立即联系', '立即聊', 'Hi聊', '沟通'];

@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 1 — 正确性与退出码契约 |
 | 优先级 | P0 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | T101（fail 异常化） |
 | 验证 | 自动 + 实机 🧪 |
 
@@ -40,6 +40,16 @@
 - [ ] 确认时答 n → 退出 0，输出「已跳过」，不被误报为成功
 - [ ] Hi 成功 → 退出 0（🧪）
 - [ ] 四条 Hi 路径（greet / recommend --greet / inspect --hi / talent-detail --hi）退出码行为一致
+
+## 实施记录（2026-08-27）
+
+- `HiOutcome` 扩展为六值：新增 `dry_run`（--dry-run 结束）与 `cancelled`（Y/N 确认跳过），消除 `unknown` 语义过载；类型注释写明各值退出码语义。
+- `greetTalent`：dry-run 分支返回 `dry_run`、确认取消返回 `cancelled`（原均为 `unknown`）。
+- 命令层统一映射（greet / recommend --greet / inspect --hi / talent-detail --hi）：
+  success/dry_run/cancelled → 0；quota_exhausted/failed/unknown → 1；**JSON 模式先输出 hiResult 再 fail**（修复 JSON 模式失败退出 0 的不一致）。
+- talent-detail：`none`（无回复按钮）保持退出 0（两模式一致），仅 `failed` 非零。
+- `npm run build` 通过；exit-code 映射的实机验证（Hi 成功/额度不足）归实机批次。
+- 已知残留：greet JSON 模式下详情与 hiResult 仍分两次输出（greetTalent 内部 printJson + 命令层 printJson）——T103 单文档协议处理。
 
 ## 注意事项
 

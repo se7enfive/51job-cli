@@ -585,8 +585,8 @@ export async function locateCandidate(
  * - 前置筛选：`opts.filters` 复用 search 的 13 维筛选
  * - 详情管线（传入 browser 时）：开详情 → 摘要 → 人机确认 → 详情页 Hi
  *   - `browser` 为空时回退旧路径：卡片「立即Hi聊」一键
- * - `--dry-run`：只看详情 + 摘要，不 Hi
- * @returns HiOutcome（success / quota_exhausted / failed / unknown；true 语义废弃）
+ * - `--dry-run`：只看详情 + 摘要，不 Hi（返回 dry_run）
+ * @returns HiOutcome（success / quota_exhausted / failed / unknown / dry_run / cancelled）
  */
 export async function greetTalent(
   page: Page,
@@ -634,7 +634,7 @@ export async function greetTalent(
     // 决策
     if (opts.dryRun) {
       out('--dry-run：已查看详情，未发出打招呼');
-      return 'unknown';
+      return 'dry_run';
     }
     const targetName = detail.name || name || `候选人${idx}`;
     const yes = opts.confirm !== false
@@ -642,7 +642,7 @@ export async function greetTalent(
       : true;
     if (!yes) {
       out(`已跳过「${targetName}」，未打招呼`);
-      return 'unknown';
+      return 'cancelled';
     }
     return hiChatOnDetail(detailPage, { throttle });
   }

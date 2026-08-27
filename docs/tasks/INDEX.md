@@ -28,7 +28,7 @@
 | ID | 任务 | 优先级 | 依赖 | 主要文件 | 状态 |
 |---|---|---|---|---|---|
 | T101 | `fail()` 异常化退出（基础机制） | P0 | 无 | utils/output.ts、index.ts | done |
-| T102 | `greet` 退出码与结果类型修正 | P0 | T101 | index.ts、pages/search.ts、pages/hi-result.ts | todo |
+| T102 | `greet` 退出码与结果类型修正 | P0 | T101 | index.ts、pages/search.ts、pages/hi-result.ts | done |
 | T103 | JSON 输出协议：单文档 + 统一退出码 | P0 | T101、T102 | index.ts | todo |
 | T104 | `wait-login` 超时退出码与参数校验 | P0 | T101 | index.ts、pages/login.ts | todo |
 | T105 | `list`/`chat` 序号空间一致性 | P0 | 无 | pages/inbox.ts、pages/chat.ts、index.ts | todo |
