@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 1 — 正确性与退出码契约 |
 | 优先级 | P0 |
-| 状态 | todo |
+| 状态 | done（2026-08-27，实机回归待批次） |
 | 依赖 | 无（与 T102/T103 协同） |
 | 验证 | 自动（纯逻辑部分）+ 实机 🧪 |
 
@@ -39,6 +39,14 @@
 - [ ] 实机 🧪：推荐列表 ≥3 人，Hi 第 2 人成功 → 结果为 `success`（修复前为 unknown）
 - [ ] 实机 🧪：目标未成功（如弹未识别弹窗或断网模拟）→ 不误报 success
 - [ ] 详情页 Hi 路径行为不回归（🧪，可复用 T102 的实机批次）
+
+## 实施记录（2026-08-27）
+
+- `detectHiResult` 新增 `cardSelector` + `targetIndex`（0-based）参数：成功判定只读目标卡内 `button/[role=button]/[class*="btn"]` 文本（`[class*="btn"]` 兜底「按钮被状态标签替换」形态）。
+- 卡片定位失败（下标漂移/重渲染）自动降级 `btnText` 全页扫描并 warn——按任务注记的降级策略实现。
+- 弹窗判定（额度/失败/未识别）保持页面级不变。
+- 调用方：`greetRecommend` 传 `targetIndex: idx`（0-based）；`greetTalent` 旧路径传 `targetIndex: idx - 1`；详情页 `hiChatOnDetail` 不变（单按钮页）。
+- `npm run build` 通过。`stillInitial` 与目标限定逻辑的单元用例随 T301 补；多卡成功/不误报的实机验证归实机批次。
 
 ## 注意事项
 

@@ -670,7 +670,14 @@ export async function greetTalent(
     .catch(() => false);
   if (clicked) {
     out(`已点击「${name || `第${idx}位候选人`}」的「立即Hi聊」，校验结果…`);
-    return { outcome: await detectHiResult(page, { btnText: `${s.resultList} ${s.resultItem} button` }) };
+    // T106：成功判定只看被点击的这张卡（idx 为 locateCandidate 的 1-based 序号）
+    return {
+      outcome: await detectHiResult(page, {
+        cardSelector: `${s.resultList} ${s.resultItem}`,
+        targetIndex: idx - 1,
+        btnText: `${s.resultList} ${s.resultItem} button`,
+      }),
+    };
   }
   warn('已在列表中定位到候选人，但未找到「立即Hi聊」按钮');
   return { outcome: 'failed' };

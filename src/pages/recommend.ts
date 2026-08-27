@@ -224,7 +224,12 @@ export async function greetRecommend(page: Page, nameOrIndex: string, opts: { th
   if (clicked) {
     out(`已点击推荐候选人「${nameOrIndex}」的「立即Hi聊」，校验结果…`);
     // 弹出额度/失败弹窗或按钮文案变化 = 真实结果
-    return detectHiResult(page, { btnText: `${s.resultItem} button.tm_button` });
+    // T106：成功判定只看被点击的这张卡（idx 为 0-based），其他卡的初始文案不再遮蔽信号
+    return detectHiResult(page, {
+      cardSelector: s.resultItem,
+      targetIndex: idx,
+      btnText: `${s.resultItem} button.tm_button`,
+    });
   }
   warn(`已在推荐列表定位到「${nameOrIndex}」，但未找到「立即Hi聊」按钮（可能已转发）`);
   return 'failed';

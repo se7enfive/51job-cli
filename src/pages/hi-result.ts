@@ -101,6 +101,24 @@ async function btnTexts(page: Page, selector: string): Promise<string[]> {
     .catch(() => []);
 }
 
+/**
+ * 只读取目标卡片内的按钮/状态文本（T106）。
+ * 列表多卡时，成功判定只看被点击的那张卡——否则其他卡的「立即Hi聊」初始文案
+ * 会遮蔽目标卡的成功信号（恒判 unknown），或他卡变化被误判为目标成功。
+ * 返回 null 表示卡片定位失败（下标漂移/重渲染），调用方降级全页扫描。
+ */
+async function btnTextsInCard(page: Page, cardSelector: string, cardIndex: number): Promise<string[] | null> {
+  return page
+    .evaluate((sel, i) => {
+      const card = document.querySelectorAll(sel)[i];
+      if (!card) return null;
+      // 按钮之外兜底 [class*="btn"]：部分卡片 Hi 后按钮可能被状态标签替换
+      const els = Array.from(card.querySelectorAll('button, [role="button"], [class*="btn"]'));
+      return els.map((e) => ((e as HTMLElement).textContent || '').trim()).filter((t) => t.length > 0);
+    }, cardSelector, cardIndex)
+    .catch(() => null);
+}
+
 function stillInitial(texts: string[]): boolean {
   return texts.some((t) => HI_BTN_INITIAL_TEXTS.some((it) => t.includes(it)));
 }
@@ -111,8 +129,26 @@ function stillInitial(texts: string[]): boolean {
  *
  * @param page   当前页（列表页或详情页）
  * @param opt.btnText Hi 按钮选择器（用于「文案变化=成功」判定；缺省则只靠弹窗判定）
+ * @param opt.cardSelector 目标卡容器选择器（列表页多卡场景，T106）
+ * @param opt.targetIndex 目标卡下标（0-based，与 cardSelector 配套）；
+ *   提供后成功判定只看这张卡——卡片定位失败自动降级 btnText 全页扫描并 warn。
  */
-export async function detectHiResult(page: Page, opt: { btnText?: string } = {}): Promise<HiOutcome> {
+export async function detectHiResult(
+  page: Page,
+  opt: { btnText?: string; cardSelector?: string; targetIndex?: number } = {}
+): Promise<HiOutcome> {
+  // 目标限定文本收集（T106）：cardSelector+targetIndex 优先，失败降级 btnText 全页扫描
+  const collectTargetTexts = async (): Promise<string[] | null> => {
+    if (opt.cardSelector && opt.targetIndex !== undefined) {
+      const inCard = await btnTextsInCard(page, opt.cardSelector, opt.targetIndex);
+      if (inCard !== null) return inCard;
+      warn('目标卡片定位失败（可能重渲染），降级为全页按钮扫描判定');
+    }
+    if (opt.btnText) return btnTexts(page, opt.btnText);
+    return null;
+  };
+  const hasBtnCheck = !!(opt.btnText || (opt.cardSelector && opt.targetIndex !== undefined));
+
   // 等待弹窗/按钮变化出现（0.6~1.4s）
   await delay(600 + Math.random() * 800);
 
@@ -131,10 +167,10 @@ export async function detectHiResult(page: Page, opt: { btnText?: string } = {})
     return 'failed';
   }
 
-  // 3) 按钮文案变化 = 成功
-  if (opt.btnText) {
-    const texts = await btnTexts(page, opt.btnText);
-    if (texts.length > 0 && !stillInitial(texts)) {
+  // 3) 按钮文案变化 = 成功（只看目标卡，T106）
+  if (hasBtnCheck) {
+    const texts = await collectTargetTexts();
+    if (texts && texts.length > 0 && !stillInitial(texts)) {
       out('Hi 已发出：按钮文案已离开「立即Hi聊」初始态');
       return 'success';
     }
@@ -153,9 +189,9 @@ export async function detectHiResult(page: Page, opt: { btnText?: string } = {})
     await closeHiDialog(page);
     return 'failed';
   }
-  if (opt.btnText) {
-    const texts = await btnTexts(page, opt.btnText);
-    if (texts.length > 0 && !stillInitial(texts)) {
+  if (hasBtnCheck) {
+    const texts = await collectTargetTexts();
+    if (texts && texts.length > 0 && !stillInitial(texts)) {
       out('Hi 已发出（复查确认按钮文案已变化）');
       return 'success';
     }

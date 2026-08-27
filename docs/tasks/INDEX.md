@@ -32,7 +32,7 @@
 | T103 | JSON 输出协议：单文档 + 统一退出码 | P0 | T101、T102 | index.ts | done |
 | T104 | `wait-login` 超时退出码与参数校验 | P0 | T101 | index.ts、pages/login.ts | done |
 | T105 | `list`/`chat` 序号空间一致性 | P0 | 无 | pages/inbox.ts、pages/chat.ts、index.ts | done |
-| T106 | Hi 结果判定收敛到被点击卡片 | P0 | 无 | pages/hi-result.ts、pages/recommend.ts、pages/search.ts | todo |
+| T106 | Hi 结果判定收敛到被点击卡片 | P0 | 无 | pages/hi-result.ts、pages/recommend.ts、pages/search.ts | done |
 | T107 | 详情页身份校验与错位防护 | P0 | 无 | pages/talent-insight.ts、pages/candidate-detail.ts、index.ts | todo |
 | T108 | 会话重试边界：写操作不自动重跑 | P0 | 无 | core/sessionPage.ts、pages/chat.ts | todo |
 | T109 | 非交互确认安全（stdin EOF 不挂起） | P1 | 无 | utils/confirm.ts | todo |
