@@ -33,6 +33,20 @@ function padDisplay(s: string, width: number): string {
   return s + ' '.repeat(width - w);
 }
 
+/** 超宽单元格截断加省略号（T110）：保证列宽 ≤ 上限，表格不再因长字段错位 */
+function truncateDisplay(s: string, maxWidth: number): string {
+  if (displayWidth(s) <= maxWidth) return s;
+  let out = '';
+  let w = 0;
+  for (const ch of s) {
+    const cw = displayWidth(ch);
+    if (w + cw > maxWidth - 1) break; // 留 1 列给省略号
+    out += ch;
+    w += cw;
+  }
+  return out + '…';
+}
+
 export function printTable(rows: Row[]): void {
   if (rows.length === 0) {
     out('(empty)');
@@ -51,7 +65,7 @@ export function printTable(rows: Row[]): void {
   out(line);
   out('-'.repeat(displayWidth(line)));
   for (const r of rows) {
-    out(headers.map((h, i) => padDisplay(r[h] === undefined ? '' : String(r[h]), widths[i])).join('  '));
+    out(headers.map((h, i) => padDisplay(truncateDisplay(r[h] === undefined ? '' : String(r[h]), widths[i]), widths[i])).join('  '));
   }
 }
 

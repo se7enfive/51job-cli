@@ -537,6 +537,12 @@ export async function ensureSearchPool(
   keyword: string,
   opts: { throttle?: Throttle; filters?: SearchFilters } = {}
 ): Promise<boolean> {
+  // T110 输入防护：拒绝空关键词搜索——空串搜索返回不可控结果池，
+  // 按序号定位可能作用到错误候选人。防御所有调用方（不只 greet 入口）。
+  if (!keyword.trim()) {
+    warn('搜索关键词为空（未提供姓名/--job），拒绝建立候选池。请提供姓名或 --job，或先在页面上完成搜索。');
+    return false;
+  }
   await searchTalents(page, keyword, opts);
   const s = selectors.search;
   const got = await waitForSelector(page, `${s.resultList} ${s.resultItem}`, 12000).catch(() => null);
@@ -613,6 +619,12 @@ export async function greetTalent(
   await assertNoRisk(page, { action: `对 ${name || `第${opts.index}位候选人`} 打招呼`, soft: false });
   const throttle = opts.throttle;
   if (throttle) await throttle.wait();
+
+  // T110 输入防护：姓名/--job/--by-index 至少其一，否则拒绝空关键词兜底搜索
+  if (!name && !opts.job && opts.index === undefined) {
+    warn('需要姓名、--job 或 --by-index 之一，无法建立候选池');
+    return { outcome: 'failed' };
+  }
 
   // 0) 无结果时保底搜索（兼容旧调用：不传 filters 也自主导航）
   const got = await ensureSearchPool(page, opts.job || name, { throttle, filters: opts.filters });

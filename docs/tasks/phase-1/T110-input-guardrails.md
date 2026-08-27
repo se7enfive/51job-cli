@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 1 — 正确性与退出码契约 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | T105（chat 的 0 falsy 已在该任务修，本任务扫全仓余量） |
 | 验证 | 自动 |
 
@@ -30,6 +30,14 @@
 - [ ] `51job greet --by-index 1`（无姓名无 --job、页面无结果池）→ 退出 1，不发起空搜索
 - [ ] `--index 0` / `--by-index 0` / 非数字 → 明确报错，不静默回退
 - [ ] 含超长字段的表格输出列不再错位
+
+## 实施记录（2026-08-27）
+
+- `inspect` 未命中：`warn + return` → `fail(...)`（退出 1）。
+- `ensureSearchPool` 关键词空串/纯空白 → 拒绝并 warn（防御所有调用方）；`greetTalent` 入口校验姓名/--job/--by-index 至少其一。
+- falsy 序号排查：全仓仅剩 `opts.byIndex ?`（greet）与 `opts.index`（inspect 的 `if (opts.index)`）；均已改为 `!== undefined` + `parseInt` + `Number.isFinite && > 0` 校验，`--index 0`/`--by-index 0`/非数字明确报错。
+- `printTable` 超宽单元格按显示宽度截断加 `…`，列不再错位。
+- 已验证：表格截断对齐、`greet --by-index 0` / `chat --index abc` 均明确报错。
 
 ## 注意事项
 

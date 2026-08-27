@@ -164,12 +164,19 @@ program
   .option('--strict', '精确匹配姓名')
   .action(async (name, opts) => {
     const throttle = createThrottle(parseThrottleEnv());
+    // T110：序号参数校验——非法值/0 报错，不产生 NaN 传播
+    let index: number | undefined;
+    if (opts.index !== undefined) {
+      index = parseInt(opts.index, 10);
+      if (!Number.isFinite(index) || index <= 0) {
+        fail(`--index 需为正整数序号（1-based），收到: "${opts.index}"`);
+      }
+    }
     await runCommand(async (page) => {
       const opened = await openChat(page, {
         name: name || undefined,
-        // T105：--unread 真正生效；opts.index !== undefined（0 是非法序号而非「未提供」，
-        // 交由 openChat 报越界，不再被 falsy 吞掉静默回退姓名匹配）
-        index: opts.index !== undefined ? parseInt(opts.index, 10) : undefined,
+        // T105：--unread 真正生效；序号非法值已在上方校验
+        index,
         unreadOnly: opts.unread,
         strict: opts.strict,
         throttle,
@@ -343,6 +350,14 @@ addSearchFilterOptions(greetCmd);
 greetCmd.action(async (name, opts) => {
   if (opts.json) setFormat('json');
   const throttle = createThrottle(parseThrottleEnv());
+  // T110：序号参数校验——非法值/0 报错，不静默回退姓名匹配
+  let byIndex: number | undefined;
+  if (opts.byIndex !== undefined) {
+    byIndex = parseInt(opts.byIndex, 10);
+    if (!Number.isFinite(byIndex) || byIndex <= 0) {
+      fail(`--by-index 需为正整数序号（1-based），收到: "${opts.byIndex}"`);
+    }
+  }
   await runCommand(async (page) => {
     const bid = await getBrowserRef();
     if (!bid) fail('浏览器未就绪');
@@ -353,7 +368,7 @@ greetCmd.action(async (name, opts) => {
       job: opts.job,
       throttle,
       filters: filtersFromOpts(opts),
-      index: opts.byIndex ? parseInt(opts.byIndex, 10) : undefined,
+      index: byIndex,
       dryRun: opts.dryRun,
       confirm: opts.confirm, // commander --no-confirm -> opts.confirm === false
       browser: bid,
@@ -411,8 +426,12 @@ program
 
       // 定位卡片序号：优先 --index；否则按姓名文本匹配
       let cardIndex: number | undefined;
-      if (opts.index) {
+      if (opts.index !== undefined) {
         cardIndex = parseInt(opts.index, 10);
+        // T110：序号参数校验——非法值/0 报错（0 的 falsy 问题一并消除）
+        if (!Number.isFinite(cardIndex) || cardIndex <= 0) {
+          fail(`--index 需为正整数序号（1-based），收到: "${opts.index}"`);
+        }
       } else {
         const items = await page.$$(`${selectors.search.resultList} ${selectors.search.resultItem}`).catch(() => []);
         for (let i = 0; i < items.length; i++) {
@@ -420,8 +439,8 @@ program
           if (t.includes(name)) { cardIndex = i + 1; break; }
         }
         if (!cardIndex) {
-          warn(`未在搜索结果中定位到「${name}」，请用 --index 指定卡片序号或换关键词`);
-          return;
+          // T110：未命中改为失败退出（原 warn + return 0 会误导编排层「成功但无数据」）
+          fail(`未在搜索结果中定位到「${name}」，请用 --index 指定卡片序号或换关键词`);
         }
       }
 
