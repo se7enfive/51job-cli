@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 2 — 安全与隐私 |
 | 优先级 | P1 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无 |
 | 验证 | 自动 |
 
@@ -34,6 +34,13 @@
 - [ ] `51JOB_PROJECT_ENV=1` 时项目级 `.env` 生效且有加载提示
 - [ ] 用户级 `~/.51job-cli/.env` 与系统环境变量行为不变
 - [ ] 与「系统环境变量优先于 .env」的既有语义不冲突（dotenv override:false 保持）
+
+## 实施记录（2026-08-27）
+
+- 采用任务推荐方案 a：`51JOB_PROJECT_ENV=1/true` 显式开启项目级 `./.env` 加载，默认不读；加载时经 stderr 输出 `[info] 已加载项目级配置: <路径>`（用 err 而非 out，不污染数据输出）。
+- `.env.example` 头部用法/优先级说明同步修正（系统环境变量 > 用户级 > 项目级）。
+- **结论性验证**：临时目录植入 `CHROME_PATH=<恶意值>` ——默认 `doctor` 仍显示真实 Chrome；`51JOB_PROJECT_ENV=1` 时注入值生效且出现加载提示（用真实存在的 notepad.exe 验证注入通路，findChrome 的 existsSync 守卫同时拦截不存在的路径）。
+- **迁移说明（归 T403/CHANGELOG）**：原依赖项目级 .env 的用户需设 `51JOB_PROJECT_ENV=1` 或迁移到用户级。
 
 ## 注意事项
 

@@ -26,11 +26,19 @@ import { ensureDirs, root as storeRoot } from './utils/store';
 import { collectExpiredFiles } from './utils/clean';
 import { version } from '../package.json';
 
-// 环境变量加载：先读 ~/.51job-cli/.env（用户级持久配置），再读 ./.env（项目级覆盖）。
-// 不存在的文件静默跳过；两者都不会覆盖已存在的系统环境变量（dotenv 默认行为）。
+// 环境变量加载（T205 收敛）：默认只读 ~/.51job-cli/.env（用户级持久配置）+ 系统环境变量。
+// 项目级 ./.env 需显式开启（51JOB_PROJECT_ENV=1）——全局安装的 CLI 在任意目录执行时，
+// 自动读取该目录 .env 存在注入风险（CHROME_PATH → spawn 任意可执行、OCR 密钥重定向、
+// 关闭风控拦截等）。两者都不会覆盖已存在的系统环境变量（dotenv 默认行为）。
 const userEnvPath = join(homedir(), '.51job-cli', '.env');
 if (existsSync(userEnvPath)) loadEnv({ path: userEnvPath, quiet: true });
-loadEnv({ quiet: true });
+if (process.env['51JOB_PROJECT_ENV'] === '1' || process.env['51JOB_PROJECT_ENV'] === 'true') {
+  const projectEnvPath = join(process.cwd(), '.env');
+  if (existsSync(projectEnvPath)) {
+    loadEnv({ path: projectEnvPath, quiet: true });
+    err(`[info] 已加载项目级配置: ${projectEnvPath}`);
+  }
+}
 
 const program = new Command();
 

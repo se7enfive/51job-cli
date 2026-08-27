@@ -41,7 +41,7 @@
 | T202 | 简历 OCR 改显式 opt-in | P0 | 无 | ocr/resume_ocr.ts、pages/chat.ts | done |
 | T203 | 本地 PII 权限收紧与保留期清理 | P1 | 无 | utils/store.ts、index.ts（新 clean 命令） | done |
 | T204 | 会话锁不再记录完整命令行 | P1 | 无 | core/sessionLock.ts | done |
-| T205 | cwd `.env` 加载策略收敛 | P1 | 无 | index.ts | todo |
+| T205 | cwd `.env` 加载策略收敛 | P1 | 无 | index.ts | done |
 | T301 | Vitest 单元测试基线 | P1 | T102/T103/T105（映射类用例） | package.json、test/（新增） | todo |
 | T302 | CI 门禁与发布流程修复 | P1 | T301 | .github/workflows/*、package.json | todo |
 | T303 | smoke 冒烟测试隔离化 | P2 | 无 | scripts/smoke-*、core/state.ts、utils/store.ts | todo |
