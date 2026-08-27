@@ -57,12 +57,24 @@ const BLOCKED_SECURITY_SCRIPT_PATTERNS = parsePatternList('51JOB_BLOCK_SCRIPT_PA
   (urlPattern) => ({ urlPattern, requestStage: 'Request' as const }),
 );
 
-/** 51job 埋点/上报信标关键词（默认拦截并 204 吞掉，不影响业务功能） */
-const REPORT_KEYWORDS = ['dap', 'collect', 'tracker', 'monitor'] as const;
-const REPORT_REQUEST_PATTERNS = parsePatternList(
-  '51JOB_BLOCK_REPORT_PATTERNS',
-  REPORT_KEYWORDS.map((k) => `*51job.com/*${k}*`),
-).map((urlPattern) => ({ urlPattern, requestStage: 'Request' as const }));
+/**
+ * 51job 埋点/上报信标关键词（T308 收敛）：
+ * - 默认只「观察」：命中请求记入页面 DevTools console 后放行（observe 模式），
+ *   便于 probe 校准时发现真实埋点路径；
+ * - 经 `51JOB_BLOCK_REPORT_PATTERNS`（逗号分隔 URL pattern）显式配置后才 204 吞掉。
+ * 不再默认拦截——collect/monitor 等宽泛关键词可能误杀业务接口，被 204 吞掉的
+ * 请求让「操作没生效但不报错」，是自动化工具最危险的故障形态。
+ */
+const REPORT_CANDIDATE_KEYWORDS = ['dap', 'collect', 'tracker', 'monitor'] as const;
+/** 观察模式 pattern：默认生效（命中 → 页面 console 记录后放行） */
+const REPORT_OBSERVE_PATTERNS = REPORT_CANDIDATE_KEYWORDS.map((k) => ({
+  urlPattern: `*51job.com/*${k}*`,
+  requestStage: 'Request' as const,
+}));
+/** 显式配置后真正拦截（204）的 pattern：默认空（与安全脚本拦截同一策略） */
+const REPORT_REQUEST_PATTERNS = parsePatternList('51JOB_BLOCK_REPORT_PATTERNS', []).map(
+  (urlPattern) => ({ urlPattern, requestStage: 'Request' as const }),
+);
 
 /** 51job 验证/风控页关键词：出现在 URL 路径段或 query 参数名时视为风险导航 */
 const RISK_NAV_KEYWORDS = ['verify', 'captcha', 'risk', 'security', 'checkcode', 'safeguard', 'blocked'] as const;
@@ -72,7 +84,7 @@ const RISK_NAVIGATION_PATTERNS = RISK_NAV_KEYWORDS.map((k) => ({
 }));
 
 const REPORT_REQUEST_RE = new RegExp(
-  `51job\\.com/(?:.*/)?(?:${REPORT_KEYWORDS.join('|')})(?:/|\\?|$)`,
+  `51job\\.com/(?:.*/)?(?:${REPORT_CANDIDATE_KEYWORDS.join('|')})(?:/|\\?|$)`,
   'i',
 );
 
@@ -565,6 +577,7 @@ async function ensurePageRequestGuard(page: Page): Promise<void> {
     patterns: [
       ...BLOCKED_SECURITY_SCRIPT_PATTERNS,
       ...REPORT_REQUEST_PATTERNS,
+      ...REPORT_OBSERVE_PATTERNS,
       ...(shouldAllowRiskNav() ? [] : RISK_NAVIGATION_PATTERNS),
     ],
   });
@@ -598,16 +611,26 @@ async function ensurePageRequestGuard(page: Page): Promise<void> {
           ? `[51job-cli][${label}] ${method} ${url} body=${body}`
           : `[51job-cli][${label}] ${method} ${url}`,
       );
-      void cdp
-        .send('Fetch.fulfillRequest', {
-          requestId: params.requestId,
-          responseCode: 204,
-          responsePhrase: 'No Content',
-          responseHeaders: buildNoContentResponseHeaders(params.request.headers),
-        })
-        .catch(() => {
-          console.error(`[51job-cli] 日志上报请求拦截响应失败：${url}`);
-        });
+      // T308：默认观察模式（未配置 51JOB_BLOCK_REPORT_PATTERNS）→ 记录后放行；
+      // 显式配置后才 204 吞掉
+      if (REPORT_REQUEST_PATTERNS.length > 0) {
+        void cdp
+          .send('Fetch.fulfillRequest', {
+            requestId: params.requestId,
+            responseCode: 204,
+            responsePhrase: 'No Content',
+            responseHeaders: buildNoContentResponseHeaders(params.request.headers),
+          })
+          .catch(() => {
+            console.error(`[51job-cli] 日志上报请求拦截响应失败：${url}`);
+          });
+      } else {
+        void cdp
+          .send('Fetch.continueRequest', { requestId: params.requestId })
+          .catch(() => {
+            /* 会话销毁时忽略 */
+          });
+      }
       return;
     }
 

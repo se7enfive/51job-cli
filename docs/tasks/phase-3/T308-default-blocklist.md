@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 3 — 质量门禁与可靠性加固 |
 | 优先级 | P2 |
-| 状态 | todo |
+| 状态 | done（2026-08-27，实机业务抽查待批次） |
 | 依赖 | 无（与 T306 同改 pageGuards.ts，注意冲突组 G8） |
 | 验证 | 实机 🧪（业务功能抽查） |
 
@@ -32,6 +32,15 @@ const REPORT_KEYWORDS = ['dap', 'collect', 'tracker', 'monitor'] as const;
 - [ ] 配置 `51JOB_BLOCK_REPORT_PATTERNS` 后拦截行为与之前一致
 - [ ] 观察模式日志只进页面 console，不污染 CLI stdout/stderr
 - [ ] `isRiskNavigationUrl` / 风险导航拦截行为不变（本任务不碰 RISK 关键词）
+
+## 实施记录（2026-08-27）
+
+- `REPORT_KEYWORDS` → `REPORT_CANDIDATE_KEYWORDS`：默认**不拦截**，作为观察 pattern（`REPORT_OBSERVE_PATTERNS`）加入 `Fetch.enable`——命中请求记页面 console 后 `continueRequest` 放行；`51JOB_BLOCK_REPORT_PATTERNS` 显式配置后才走 204（`REPORT_REQUEST_PATTERNS` 默认空，与安全脚本拦截同一策略）。
+- handler 分流：`report` 类请求按「是否配置了拦截 pattern」决定 204 或放行。
+- `.env.example` 注释同步（默认观察、probe 校准后再启用拦截）。
+- `skills/`、`scripts/` grep 确认无引用旧行为。
+- `npm run build` 通过；默认配置下 list/send 无请求被吞的实机抽查归实机批次。
+- 跟进项（实施记录）：probe 确认真实埋点路径后，把精确 pattern 写回默认值。
 
 ## 注意事项
 
