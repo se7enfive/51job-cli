@@ -76,12 +76,3 @@ export async function waitForLogin(page: Page, opts: { timeoutSec?: number } = {
   // 超时只通过返回值表达（ok:false）；错误提示由命令层统一输出，避免双份日志
   return { ok: false, url: page.url(), waitedSeconds: Math.round((Date.now() - start) / 1000) };
 }
-
-/**
- * 完整登录流程（兼容旧调用）：开页 + 等待。
- * 新命令入口建议用 login（分离）+ wait-login（轮询）两步。
- */
-export async function doLogin(page: Page, opts: { timeoutSec?: number } = {}): Promise<LoginResult> {
-  await openLoginPage(page);
-  return waitForLogin(page, opts);
-}

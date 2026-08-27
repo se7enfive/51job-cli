@@ -133,15 +133,6 @@ export async function openTalentMgmtDetail(
     warn('回复按钮定位失败，页面可能已刷新。');
     return null;
   }
-  // 行容器 = 按钮向上第 2 层（避免 .name 祖先层级差异，直接取按钮行）
-  const rowH = await replyBtn.evaluate((btn) => {
-    let el: HTMLElement | null = btn as HTMLElement;
-    for (let k = 0; k < 8 && el; k++) {
-      if (el.querySelector('.name')) break;
-      el = el.parentElement;
-    }
-    return el;
-  }).catch(() => null);
 
   // 4. 记录点击前的 Page 对象集合（T306：与 openDetailByIndex 同法——按对象身份判新页，
   // 不依赖 targetcreated 事件，兼容同 URL 二次查看）

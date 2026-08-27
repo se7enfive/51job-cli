@@ -22,19 +22,6 @@ export function isEhireSiteUrl(url: string): boolean {
   }
 }
 
-/** 当前 URL 是否属于 51job 登录域（login.51job.com） */
-export function isEhireLoginUrl(url: string): boolean {
-  if (!url || url === 'about:blank') {
-    return false;
-  }
-  try {
-    const u = new URL(url);
-    return u.hostname === 'login.51job.com' || u.hostname.endsWith('.login.51job.com');
-  } catch {
-    return false;
-  }
-}
-
 export function findChrome(): string | null {
   const env = process.env['CHROME_PATH'] || process.env['51JOB_CHROME'];
   if (env && fs.existsSync(env)) return env;

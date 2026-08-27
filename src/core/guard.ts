@@ -1,6 +1,5 @@
 import type { Page } from 'puppeteer-core';
 import { warn, fail } from '../utils/output';
-
 const RISK_URL_PATTERNS: RegExp[] = [
   /verify/i,
   /captcha/i,
@@ -78,39 +77,5 @@ export async function assertNoRisk(page: Page, opts: { soft?: boolean; action?: 
 
   if (!opts.soft) {
     fail('风控熔断: 为避免账号风险，命令已停止');
-  }
-}
-
-/**
- * 风控页反弹熔断计数器：连续命中 N 次后强制停止，防止 Agent 循环重试加剧风控。
- */
-export class RiskCircuitBreaker {
-  private hits = 0;
-  private lastHitAt = 0;
-  constructor(
-    private readonly maxHits = 3,
-    private readonly windowMs = 60 * 1000
-  ) {}
-
-  async record(page: Page): Promise<void> {
-    const now = Date.now();
-    if (now - this.lastHitAt > this.windowMs) {
-      this.hits = 0;
-    }
-    this.hits += 1;
-    this.lastHitAt = now;
-
-    const r = await checkRisk(page);
-    if (r.isRisk) {
-      this.hits += 1;
-      warn(`连续命中风控特征 ${this.hits} 次`);
-      if (this.hits >= this.maxHits) {
-        fail(`风控熔断触发（连续 ${this.hits} 次），已停止。请人工处理后重试。`);
-      }
-    }
-  }
-
-  reset(): void {
-    this.hits = 0;
   }
 }

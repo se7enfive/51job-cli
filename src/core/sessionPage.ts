@@ -109,10 +109,6 @@ export function getBrowserRef(): Browser | null {
   return browserRef;
 }
 
-export function getPageRef(): Page | null {
-  return pageRef;
-}
-
 /** 当前会话中的额外打开的 tab（新开详情页等），不在主 pageRef 上。 */
 let extraPages = new Set<Page>();
 
@@ -123,24 +119,6 @@ export function getExtraPages(): Page[] {
 /** 记录一个由业务代码打开的额外 tab（用于统一清理）。 */
 export function trackExtraPage(page: Page): void {
   extraPages.add(page);
-}
-
-/** 从当前浏览器按 URL 关键字找一个已打开的 tab（跨 tab 切换上下文）。 */
-export function findPageByUrl(browser: Browser, keyword: string): Promise<Page | null> {
-  return browser
-    .pages()
-    .then((pages) => {
-      for (const p of pages) {
-        if (p.isClosed()) continue;
-        try {
-          if (p.url().includes(keyword)) return p;
-        } catch {
-          /* ignore */
-        }
-      }
-      return null;
-    })
-    .catch(() => null);
 }
 
 /** 页面级监听器防重（withSessionPage 每次命令都会调用，避免重复挂载） */

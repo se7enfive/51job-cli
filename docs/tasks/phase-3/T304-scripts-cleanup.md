@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 3 — 质量门禁与可靠性加固 |
 | 优先级 | P2 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无（建议在 T301-T307 之后做，避免清到将被启用的代码） |
 | 验证 | 自动 |
 
@@ -41,6 +41,15 @@
 - [ ] `npm run smoke` 通过（需 T303 的 build 前置，至少本地手动 build 后验证）
 - [ ] 全仓 grep 不再出现已删符号
 - [ ] `git grep -n "RiskCircuitBreaker\|fix-node-modules"` 为空
+
+## 实施记录（2026-08-27）
+
+- **diag-recommend.ts 删除**（决策：不迁移）——其验证目标「推荐卡序号 ↔ 详情身份错位」已由 T107 的 verifyName 交叉校验结构性修复；脚本自身引用 `../src/` 永不编译属损坏状态；选择器校准由 `51job probe` 覆盖。
+- `diag-*.cjs`（11 个）归档至 `scripts/diag/`；新增 `scripts/README.md` 说明。
+- 删除 `fix-node-modules.js/.sh`（注释与现状相反，误导删依赖）。
+- **死代码删除**（逐符号 grep 后）：browser.`isEhireLoginUrl`、login.`doLogin`、sessionPage.`getPageRef`/`findPageByUrl`（循环尾死 throw 已随 T108 重构消失）、baidu_ocr.`clearBaiduTokenCache`、guard.`RiskCircuitBreaker`（含计数 bug，pageGuards 已有熔断体系）、human_delay 未接线导出（`selectAllModifierKey`/`typeTextWithRandomKeyDelay` + 20 个未用 timing 常量，保留 3 个在用常量与 2 个在用函数，git 历史可回溯）。
+- 无操作 `replace(/\|/g,'|')`（recommend.ts）与未用 `rowH`（talent-insight.ts）清理。
+- `npm run build` / `npm test`（51/51）/ `npm run typecheck` 全绿；死符号 grep 清零。
 
 ## 注意事项
 

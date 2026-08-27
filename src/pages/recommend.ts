@@ -180,7 +180,8 @@ export function recommendToRows(hits: RecommendHit[]): Row[] {
     '#': h.index,
     姓名: h.name,
     意向: `${h.city || ''} ${h.job || ''} ${h.salary || ''}`.trim(),
-    画像: h.meta.replace(h.name, '').replace(/\|/g, '|').trim(),
+    // T304：移除原 replace(/\|/g,'|') 无操作；meta 本身以 | 连接，姓名已在前列不再剔除
+    画像: h.meta.trim(),
     公司: h.company || '',
     状态: h.flag || h.active || '',
   }));
