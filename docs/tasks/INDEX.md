@@ -38,7 +38,7 @@
 | T109 | 非交互确认安全（stdin EOF 不挂起） | P1 | 无 | utils/confirm.ts | done |
 | T110 | 输入防护杂项（未命中/空关键词/0 falsy） | P1 | T105 | index.ts、pages/search.ts | done |
 | T201 | CDP 调试端点收敛 | P0 | 无 | core/browser.ts、utils/store.ts | done |
-| T202 | 简历 OCR 改显式 opt-in | P0 | 无 | ocr/resume_ocr.ts、pages/chat.ts | todo |
+| T202 | 简历 OCR 改显式 opt-in | P0 | 无 | ocr/resume_ocr.ts、pages/chat.ts | done |
 | T203 | 本地 PII 权限收紧与保留期清理 | P1 | 无 | utils/store.ts、index.ts（新 clean 命令） | todo |
 | T204 | 会话锁不再记录完整命令行 | P1 | 无 | core/sessionLock.ts | todo |
 | T205 | cwd `.env` 加载策略收敛 | P1 | 无 | index.ts | todo |

@@ -371,7 +371,7 @@ export async function chatAction(
  * 实测链路：打开会话 → 点面板头部「在线简历」图标（.file-style.online）
  * → 弹出 .resume 简历弹窗（求职意向/工作经历/教育经历）→ 整框截图
  * → 百度 OCR 识别为文本（~/.51job-cli/ocr/<姓名>-<日期>.txt）→ 关闭弹窗。
- * OCR 关闭：51JOB_RESUME_OCR=0；需百度 API_KEY/SECRET_KEY。
+ * OCR 默认关闭（opt-in，T202）：51JOB_RESUME_OCR=1 显式开启（截图将上传百度云识别）；需百度密钥。
  */
 export async function previewResume(page: Page, name: string, opts: { throttle?: Throttle } = {}): Promise<boolean> {
   await assertNoRisk(page, { action: `预览 ${name} 的简历`, soft: false });
@@ -469,9 +469,12 @@ async function captureAndOcrResume(
   }
 
   if (!isResumeOcrEnabled()) {
-    out('简历 OCR 未开启（51JOB_RESUME_OCR=0；默认开启，需百度 API_KEY/SECRET_KEY）');
+    // T202：OCR 默认关闭（opt-in）——截图为主产物，正常结束并提示开启方式
+    out('简历 OCR 未开启，仅保留截图。如需识别文本（截图将上传百度云），设置 51JOB_RESUME_OCR=1 并配置百度密钥。');
     return;
   }
+  // T202：上传前明示——截图含候选人个人信息，去向为百度智能云
+  out('简历截图将上传百度云 OCR 识别（含候选人个人信息；51JOB_RESUME_OCR=1 已显式开启）。');
   try {
     const { textPath } = await ocrResumePngToTextFile(pngPath);
     out(`简历文本已识别: ${textPath}`);

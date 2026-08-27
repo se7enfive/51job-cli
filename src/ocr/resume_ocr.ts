@@ -4,12 +4,14 @@ import { ocrDir } from '../utils/store';
 import { baiduOcrImageBase64, isBaiduOcrConfigured } from './baidu_ocr';
 
 /**
- * 是否对在线简历截图做 OCR（从 boss-cli 移植）。关闭：`51JOB_RESUME_OCR=0`。
- * 开启时需配置百度 `API_KEY` + `SECRET_KEY`（在线识别，无本地引擎）。
+ * 是否对在线简历截图做 OCR（从 boss-cli 移植）。
+ * T202：默认关闭（opt-in）——截图含候选人手机号/住址/完整经历等 PII，
+ * 开启即表示同意把整框截图上传百度智能云识别。显式开启：`51JOB_RESUME_OCR=1`。
+ * 开启时需配置百度 51JOB_BAIDU_API_KEY/SECRET_KEY（或通用 API_KEY/SECRET_KEY）。
  */
 export function isResumeOcrEnabled(): boolean {
   const v = process.env['51JOB_RESUME_OCR']?.trim().toLowerCase();
-  return v !== '0' && v !== 'false' && v !== 'no';
+  return v === '1' || v === 'true' || v === 'yes';
 }
 
 /** 串行执行 OCR，避免并发请求交错 */

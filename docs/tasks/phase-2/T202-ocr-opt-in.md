@@ -4,7 +4,7 @@
 |---|---|
 | 阶段 | Phase 2 — 安全与隐私 |
 | 优先级 | P0 |
-| 状态 | todo |
+| 状态 | done（2026-08-27） |
 | 依赖 | 无 |
 | 验证 | 实机 🧪（preview 链路） |
 
@@ -34,6 +34,14 @@ return v !== '0' && v !== 'false' && v !== 'no';
 - [ ] `51JOB_RESUME_OCR=1` + 密钥 → OCR 正常产出 .txt（🧪）
 - [ ] `51JOB_RESUME_OCR=1` 无密钥 → 明确报错指向配置项
 - [ ] 截图保存逻辑不受影响
+
+## 实施记录（2026-08-27）
+
+- `isResumeOcrEnabled` 反转为 opt-in：仅 `51JOB_RESUME_OCR` 为 `1/true/yes`（大小写不敏感）时开启；JSDoc 注明 PII 上传百度云的知情前提。
+- `captureAndOcrResume`（chat.ts）：未开启时提示「仅保留截图 + 如何开启」；开启且实际上传前 `out()` 明示「截图将上传百度云 OCR（含候选人个人信息）」。
+- 显式开启但未配密钥的报错路径保留（配置错误应报错）。
+- 行为矩阵已验证：undefined/0/false/no → 关闭；1/true/YES → 开启。
+- preview 全链路（截图→OCR）实机回归归实机批次。
 
 ## 注意事项
 
