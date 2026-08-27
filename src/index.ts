@@ -10,7 +10,7 @@ import { selectors } from './pages/selectors';
 import { delay } from './core/throttle';
 import { assertJobCliAvailable, JobAvailabilityError } from './core/availability';
 import { createThrottle, parseThrottleEnv } from './core/throttle';
-import { setFormat, getFormat, printTable, printJson, out, err, warn, fail } from './utils/output';
+import { setFormat, getFormat, printTable, printJson, out, err, warn, fail, FatalCliError } from './utils/output';
 import { openLoginPage, waitForLogin } from './pages/login';
 import { readInbox, candidatesToRows } from './pages/inbox';
 import { openChat, sendMessage, chatAction, previewResume } from './pages/chat';
@@ -84,8 +84,7 @@ async function runCommand(callback: (page: import('puppeteer-core').Page) => Pro
     await assertJobCliAvailable();
   } catch (e) {
     if (e instanceof JobAvailabilityError) {
-      err(e.message);
-      process.exit(2);
+      fail(e.message, 2);
     }
     throw e;
   }
@@ -540,13 +539,20 @@ program
     warn('更新请执行: npm install -g 51job-cli@latest');
   });
 
-// 无参数时打印帮助
+// 无参数时打印帮助（置 exitCode 而非 process.exit，避免管道下帮助文本被截断）
 if (process.argv.length <= 2) {
   program.outputHelp();
-  process.exit(0);
+  process.exitCode = 0;
 }
 
+// fail() 抛出的 FatalCliError 在此统一收口：消息已由 fail 写入 stderr，
+// 只置退出码并让进程自然退出——上游 finally 清理（断开浏览器/释放会话锁）已执行，
+// stdout 缓冲（--json 结果）完整落盘。
 program.parseAsync(process.argv).catch((e) => {
+  if (e instanceof FatalCliError) {
+    process.exitCode = e.exitCode;
+    return;
+  }
   err(`执行出错: ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(1);
+  process.exitCode = 1;
 });

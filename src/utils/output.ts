@@ -71,7 +71,22 @@ export function warn(msg: string): void {
   err('⚠ ' + msg);
 }
 
-export function fail(msg: string): never {
+/**
+ * 命令级致命错误：fail() 抛出后由顶层（program.parseAsync().catch）统一收口置退出码。
+ * 用异常代替 process.exit——保证 runCommand / withSessionLock 的 finally 清理
+ * （断开浏览器连接、释放会话锁）照常执行，且 stdout 缓冲（--json 结果）完整落盘。
+ */
+export class FatalCliError extends Error {
+  constructor(
+    message: string,
+    public readonly exitCode: number = 1,
+  ) {
+    super(message);
+    this.name = 'FatalCliError';
+  }
+}
+
+export function fail(msg: string, exitCode = 1): never {
   err('✖ ' + msg);
-  process.exit(1);
+  throw new FatalCliError(msg, exitCode);
 }
