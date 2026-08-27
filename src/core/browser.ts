@@ -1,0 +1,259 @@
+import * as fs from 'fs';
+import * as net from 'net';
+import * as path from 'path';
+import { spawn } from 'child_process';
+import puppeteer, { Browser, Page } from 'puppeteer-core';
+import { ensureDirs, cacheDir } from '../utils/store';
+import { err, warn } from '../utils/output';
+import { defaultUserDataDir, readState, writeState, clearState, isProcessAlive, isPortOpen, BrowserState } from './state';
+
+export const EHIRE_HOME = 'https://ehire.51job.com';
+
+/** 当前 URL 是否属于 ehire 业务域（登录态与业务主壳）；about:blank / 空 / 非法视为否 */
+export function isEhireSiteUrl(url: string): boolean {
+  if (!url || url === 'about:blank') {
+    return false;
+  }
+  try {
+    const u = new URL(url);
+    return u.hostname === 'ehire.51job.com' || u.hostname.endsWith('.ehire.51job.com');
+  } catch {
+    return false;
+  }
+}
+
+/** 当前 URL 是否属于 51job 登录域（login.51job.com） */
+export function isEhireLoginUrl(url: string): boolean {
+  if (!url || url === 'about:blank') {
+    return false;
+  }
+  try {
+    const u = new URL(url);
+    return u.hostname === 'login.51job.com' || u.hostname.endsWith('.login.51job.com');
+  } catch {
+    return false;
+  }
+}
+
+export function findChrome(): string | null {
+  const env = process.env['CHROME_PATH'] || process.env['51JOB_CHROME'];
+  if (env && fs.existsSync(env)) return env;
+
+  const candidates: string[] = [];
+  if (process.platform === 'win32') {
+    candidates.push(
+      path.join(process.env['PROGRAMFILES'] || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(process.env['LOCALAPPDATA'] || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(process.env['LOCALAPPDATA'] || '', 'Chromium', 'Application', 'chrome.exe'),
+      path.join(process.env['PROGRAMFILES'] || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    );
+  } else if (process.platform === 'darwin') {
+    candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge');
+  } else {
+    candidates.push('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium');
+  }
+
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+function findFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address();
+      if (addr && typeof addr === 'object') {
+        const port = addr.port;
+        srv.close(() => resolve(port));
+      } else {
+        srv.close(() => reject(new Error('no port')));
+      }
+    });
+  });
+}
+
+function getHeadlessFlag(): boolean {
+  const override = process.env['RECRUIT_BROWSER_HIDDEN'] || process.env['51JOB_BROWSER_HEADLESS'];
+  if (override !== undefined && override !== '') {
+    return override === 'true' || override === '1';
+  }
+  // 默认有头模式。无头 Chrome 的 UA 自报 HeadlessChrome 且 Client Hints 仍说 Google Chrome，
+  // 自相矛盾会被平台风控识别为工具指纹（boss-cli 实测封号）。
+  return false;
+}
+
+/**
+ * 通过 DevTools HTTP 端点连接常驻浏览器（浏览器级连接）。
+ * - defaultViewport: null：继承系统真实分辨率，避免 puppeteer 默认 800×600 的自动化指纹。
+ * - 只连接不启动：不下载 Chrome、不新建用户目录，登录态保留在 user-data-dir。
+ */
+async function connectBrowser(port: number): Promise<Browser> {
+  const browser = await puppeteer.connect({
+    browserURL: `http://127.0.0.1:${port}`,
+    defaultViewport: null,
+    protocolTimeout: 30_000,
+  });
+  return browser;
+}
+
+/**
+ * 获取一个已连接的可控浏览器。
+ * - 若已有常驻实例（state.json 中 pid 存活 + 端口可连），复用之；
+ * - 否则启动一个新的有头 Chrome（独立 user-data-dir），记录 state 供跨命令复用。
+ */
+export async function ensureBrowser(): Promise<Browser> {
+  ensureDirs();
+
+  const existing = readState();
+  if (existing && isProcessAlive(existing.pid) && (await isPortOpen(existing.port))) {
+    try {
+      return await connectBrowser(existing.port);
+    } catch {
+      clearState();
+    }
+  }
+
+  const chromePath = findChrome();
+  if (!chromePath) {
+    throw new Error(
+      '未找到本机 Chrome/Chromium。请安装 Chrome 或通过环境变量 CHROME_PATH 指定浏览器可执行文件路径。'
+    );
+  }
+
+  const userDataDir = defaultUserDataDir();
+  const port = await findFreePort();
+  const headless = getHeadlessFlag();
+
+  // 启动参数层反检测（P0）：手动 spawn 天然不带 --enable-automation；
+  // 补上禁用自动化控制特性 + 最大化窗口（有头模式避免 800×600 默认视口指纹）。
+  const args = [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${userDataDir}`,
+    '--remote-allow-origins=*',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-features=Translate',
+    '--disable-blink-features=AutomationControlled',
+  ];
+  if (headless) {
+    args.push('--headless=new');
+  } else {
+    args.push('--start-maximized');
+  }
+
+  const child = spawn(chromePath, args, { stdio: 'ignore', detached: false });
+  const pid = child.pid;
+
+  if (!pid) {
+    throw new Error('Chrome 启动失败');
+  }
+
+  // 等待调试端口就绪（最多 15s）
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    if (await isPortOpen(port)) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  if (!(await isPortOpen(port))) {
+    throw new Error('Chrome 调试端口未就绪，启动失败');
+  }
+
+  writeState({ pid, port, userDataDir, startedAt: new Date().toISOString() } as BrowserState);
+
+  const browser = await connectBrowser(port);
+
+  if (headless) {
+    warn('当前以无头模式运行（51JOB_BROWSER_HEADLESS=true）。无头浏览器可能被平台风控识别，有封号风险，请谨慎使用。');
+  }
+  return browser;
+}
+
+/** 新开一个空白页并设置工作视口（1440×900） */
+export async function newPage(browser: Browser): Promise<Page> {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1440, height: 900 });
+  return page;
+}
+
+/** 关闭单个页面（不影响浏览器进程与登录态） */
+export async function closePage(page: Page): Promise<void> {
+  try {
+    await page.close();
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 断开与常驻浏览器的连接（浏览器进程保留，登录态保留）。
+ * 命令结束调用；进程退出时连接也会自动断开，此函数用于显式释放。
+ */
+export async function detachBrowser(browser: Browser): Promise<void> {
+  try {
+    browser.disconnect();
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 探测常驻浏览器是否以无头模式运行（读进程外真实状态：/json/version 的 UA）。
+ * 不能依赖模块级变量——CLI 命令是独立一次性进程，刚起时引用必为空。
+ */
+export async function probeRemoteHeadless(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+    if (!res.ok) return false;
+    const data = (await res.json()) as { 'User-Agent'?: string };
+    return /HeadlessChrome/i.test(data['User-Agent'] || '');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * login 必须可见（扫码/验证码）：若已有常驻实例是无头模式，先关闭，
+ * 让下一条命令以有头重启（登录态在 user-data-dir，关掉不丢）。
+ */
+export async function ensureHeadfulForLogin(): Promise<void> {
+  process.env['51JOB_BROWSER_HEADLESS'] = 'false';
+  const state = readState();
+  if (!state) return;
+  if (isProcessAlive(state.pid) && (await isPortOpen(state.port))) {
+    if (await probeRemoteHeadless(state.port)) {
+      warn('检测到常驻浏览器为无头模式，登录需要可见窗口，正在关闭并以有头重启…');
+      await shutdownBrowser();
+    }
+  }
+}
+
+/**
+ * 优雅关闭常驻浏览器（仅 shutdown 命令调用；登录态保留在 user-data-dir）。
+ */
+export async function shutdownBrowser(): Promise<void> {
+  const state = readState();
+  if (!state) {
+    err('没有正在运行的常驻浏览器实例');
+    return;
+  }
+  if (isProcessAlive(state.pid)) {
+    try {
+      const browser = await connectBrowser(state.port);
+      await browser.close();
+    } catch {
+      try {
+        process.kill(state.pid);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  clearState();
+}

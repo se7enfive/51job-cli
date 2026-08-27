@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-diag/
+dist-package/
+.env
+.env.*
+!.env.example
+*.log
+.workbuddy/
+.DS_Store
+docs/research/
+docs/HANDOFF-STEP3.md

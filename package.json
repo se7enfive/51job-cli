@@ -1,0 +1,44 @@
+{
+  "name": "51job-cli",
+  "version": "0.1.0",
+  "description": "前程无忧自动化 CLI：候选人列表、Hi聊发消息、获取简历、人才搜索、职位管理。基于 puppeteer-core/CDP 驱动本机 Chrome，适合 AI Agent 招聘自动化",
+  "license": "GPL-3.0",
+  "bin": {
+    "51job": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "AGENTS.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "npm run build && node dist/index.js",
+    "start": "node dist/index.js",
+    "watch": "tsc -w",
+    "smoke": "node scripts/smoke-puppeteer.cjs && node scripts/smoke-guards.cjs"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "dotenv": "^17.4.2",
+    "puppeteer-core": "^24.29.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  },
+  "keywords": [
+    "51job",
+    "前程无忧",
+    "recruiting",
+    "automation",
+    "cli",
+    "ai-agent",
+    "cdp",
+    "puppeteer"
+  ]
+}

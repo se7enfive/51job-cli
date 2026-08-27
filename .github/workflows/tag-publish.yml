@@ -1,0 +1,97 @@
+name: tag-publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Publish version without leading v (optional; defaults to package.json when manually dispatched)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.ref_name || github.event.inputs.version || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Decide npm publish
+        id: npm_gate
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "NPM_TOKEN secret is missing; skipping publish."
+          fi
+
+      - name: Setup Node
+        if: ${{ steps.npm_gate.outputs.publish == 'true' }}
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Resolve target version
+        id: version
+        if: ${{ steps.npm_gate.outputs.publish == 'true' }}
+        run: |
+          set -euo pipefail
+          current_version="$(node -p "require('./package.json').version")"
+          input_version="${{ github.event.inputs.version }}"
+          if [ -n "$input_version" ]; then
+            echo "target=$input_version" >> "$GITHUB_OUTPUT"
+          else
+            echo "target=$current_version" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: ${{ steps.npm_gate.outputs.publish == 'true' }}
+        run: npm ci
+
+      - name: Build
+        if: ${{ steps.npm_gate.outputs.publish == 'true' }}
+        run: npm run build
+
+      - name: Configure npm auth
+        if: ${{ steps.npm_gate.outputs.publish == 'true' }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > "$HOME/.npmrc"
+
+      - name: Publish to npm
+        if: ${{ steps.npm_gate.outputs.publish == 'true' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          target="${{ steps.version.outputs.target }}"
+          npm version --no-git-tag-version "$target"
+          npm publish --access public
+
+      - name: Create GitHub Release (tag push only)
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && steps.npm_gate.outputs.publish == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release create "$tag" \
+            --title "$tag" \
+            --generate-notes \
+            --verify-tag
