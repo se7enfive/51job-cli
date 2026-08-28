@@ -370,12 +370,23 @@ export async function applySearchFilters(page: Page, filters: SearchFilters): Pr
  * 在人才搜索页按关键词搜索。
  * 若当前不在搜索页（/Revision/talent/search），自动 goto 直达。
  * 输入框为 el-input（Vue），需原生 setter + input 事件驱动数据绑定。
+ *
+ * @param opts.position   显式职位范围（search --position）：职位名即搜索词，且 tag 锁定该职位。
+ *                        命令层已保证与 keyword 互斥（T112 grilling 决议），这里兜底优先。
+ * @param opts.fallbackToUnlimited 职位 tag 匹配不到时是否切「不限职位」清池（默认 true，Q9a 决议；
+ *                        --position 且职位卡已找到时上层传 false——清池会破坏注入校准）。
+ * @returns JobScopeResult：matched=范围锁定目标职位 / unlimited=全池 / kept=仍停留原范围
  */
 export async function searchTalents(
   page: Page,
   keyword: string,
-  opts: { throttle?: Throttle; filters?: SearchFilters } = {}
-): Promise<void> {
+  opts: {
+    throttle?: Throttle;
+    filters?: SearchFilters;
+    position?: string;
+    fallbackToUnlimited?: boolean;
+  } = {}
+): Promise<JobScopeResult> {
   await assertNoRisk(page, { action: '人才搜索', soft: true });
 
   const s = selectors.search;
@@ -392,9 +403,11 @@ export async function searchTalents(
   const ok = await waitForSelector(page, s.keywordInput, 15000);
   if (!ok) {
     warn('未定位到搜索框。请运行 51job probe 校准选择器。');
-    return;
+    return 'kept';
   }
   await delay(500);
+
+  const kw = opts.position ?? keyword;
 
   // 原生 setter + input 事件（Vue 绑定）
   await page.evaluate((kw) => {
@@ -404,14 +417,14 @@ export async function searchTalents(
       if (setter) setter.call(box, kw);
       box.dispatchEvent(new Event('input', { bubbles: true }));
     }
-  }, keyword);
+  }, kw);
   await delay(300 + Math.random() * 300);
   if (opts.throttle) await opts.throttle.wait();
 
   // 确保搜索范围是目标职位（2026-08-28 实测：搜索页有「当前选中职位」tag（.cur_selected_job_tag），
   // goto 后残留上次职位的选中态（如上次搜「市政造价员」就锁死该职位人才池）→ 结果被污染。
   // 关键词填入后再切——「搜索词匹配职位」分组会随关键词刷新，此时才能匹配到目标项。
-  await selectJobForKeyword(page, keyword);
+  const scope = await selectJobForKeyword(page, kw, { fallbackToUnlimited: opts.fallbackToUnlimited !== false });
 
   // 应用筛选参数（点搜索前）
   if (opts.filters) {
@@ -430,63 +443,142 @@ export async function searchTalents(
   const got = await waitForSelector(page, `${s.resultList} ${s.resultItem}`, 12000);
   if (!got) await waitForSelector(page, s.noResult, 5000);
   await delay(500 + Math.random() * 500);
+  return scope;
 }
 
-/**
- * 把搜索范围切到与关键词匹配的职位（2026-08-28 实测发现的关键污染源）：
- * 搜索页顶部有「当前选中职位」tag（.cur_selected_job_tag），goto 后**残留上次职位的选中态**
- * （如上次搜「市政造价员」，本次哪怕关键词填「销售主管」，搜索也锁在市政造价员人才池——
- * 结果全是被职位过滤后的造价/预结算背景）。本函数在填好关键词后：
- * 1. 若 tag 已等于关键词 → 幂等跳过；
- * 2. 否则点 tag 打开职位下拉（.talent_search_select_job_dropdown，真实鼠标点击，
- *    因 DOM .click() 不触发 Vue 绑定），在「搜索词匹配职位/我的职位/组织下职位」分组里
- *    找 `.job-item-name` 文本匹配关键词的项并点击；
- * 3. 找不到匹配职位项（如关键词是人名或技能词）→ warn 提示但**不阻断**（保留当前范围）。
- */
-async function selectJobForKeyword(page: Page, keyword: string): Promise<void> {
-  const jobNameSel = '.cur_selected_job_tag .cur_selected_job_tag_jobname';
-  const cur = await page.evaluate((sel) => (document.querySelector(sel)?.textContent || '').trim(), jobNameSel).catch(() => '');
-  if (cur === keyword.trim()) return; // 幂等：已选中目标职位
+/** 读取「当前选中职位」tag 的职位名（空串=无选中/全池） */
+async function readJobTagName(page: Page): Promise<string> {
+  return page
+    .evaluate((sel) => (document.querySelector(sel)?.textContent || '').trim(), '.cur_selected_job_tag .cur_selected_job_tag_jobname')
+    .catch(() => '');
+}
 
-  // 打开职位下拉（真实鼠标点击 tag）
-  const box = await page.evaluate((sel) => {
-    const el = document.querySelector(sel) as HTMLElement | null;
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { x: r.x, y: r.y, w: r.width, h: r.height };
-  }, '.cur_selected_job_tag').catch(() => null);
+/** 打开「当前选中职位」职位下拉（真实鼠标点击 tag，DOM .click() 不触发 Vue 绑定） */
+async function openJobTagDropdown(page: Page): Promise<boolean> {
+  const box = await page
+    .evaluate((sel) => {
+      const el = document.querySelector(sel) as HTMLElement | null;
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    }, '.cur_selected_job_tag')
+    .catch(() => null);
   if (box && box.w > 0) {
     await page.mouse.click(box.x + box.w / 2, box.y + box.h / 2);
     await delay(800 + Math.random() * 400);
-  } else {
-    warn('未定位到「当前选中职位」控件（搜索范围可能残留）');
-    return;
+    return true;
+  }
+  warn('未定位到「当前选中职位」控件（搜索范围可能残留）');
+  return false;
+}
+
+/** 在职位下拉（.talent_search_select_job_dropdown）内按文本点职位项：精确匹配优先，其次包含匹配 */
+async function pickJobDropdownItem(page: Page, text: string): Promise<string> {
+  const picked = await page
+    .evaluate((txt) => {
+      const names = Array.from(document.querySelectorAll('.talent_search_select_job_dropdown .job-item-name'));
+      // 精确匹配优先（trim 后全等）；再退一步包含匹配
+      let n = names.find((x) => (x.textContent || '').trim() === txt);
+      if (!n) n = names.find((x) => (x.textContent || '').includes(txt));
+      const item = n?.closest('.job-item') as HTMLElement | null;
+      if (item) { item.click(); return item.textContent?.trim().slice(0, 30) ?? ''; }
+      return '';
+    }, text)
+    .catch(() => '');
+  await delay(400 + Math.random() * 300);
+  return picked;
+}
+
+/**
+ * 把搜索范围切到「不限职位」（全池）——清除残留的职位 tag（2026-08-28 用户确认下拉存在此选项）。
+ * 幂等：tag 已为空/不限职位 → 直接成功。
+ * @returns 切换成功与否
+ */
+async function ensureUnlimitedJob(page: Page): Promise<boolean> {
+  const cur = await readJobTagName(page);
+  if (cur === '' || cur === '不限职位') return true; // 幂等：已全池
+
+  // 下拉可能还开着（前一步刚点过 tag）：先直接在里面找「不限职位」项
+  if (await pickJobDropdownItem(page, '不限职位')) {
+    await delay(1200 + Math.random() * 600);
+    const now = await readJobTagName(page);
+    if (now === '' || now === '不限职位') {
+      out('搜索范围已切换至「不限职位」（全池）');
+      return true;
+    }
+  }
+  // 回退：重新打开下拉再找
+  if (!(await openJobTagDropdown(page))) return false;
+  const picked = await pickJobDropdownItem(page, '不限职位');
+  if (!picked) {
+    warn('职位下拉中未找到「不限职位」项（搜索范围可能残留）');
+    return false;
+  }
+  await delay(1200 + Math.random() * 600);
+  const now = await readJobTagName(page);
+  if (now === '' || now === '不限职位') {
+    out('搜索范围已切换至「不限职位」（全池）');
+    return true;
+  }
+  warn(`点击「不限职位」后 tag 未更新（当前「${now || '?'}」）`);
+  return false;
+}
+
+/** 职位范围锁定结果（T112 grilling 决议：供命令层 JSON 可观测） */
+export type JobScopeResult = 'matched' | 'unlimited' | 'kept';
+
+/**
+ * 把搜索范围切到与关键词匹配的职位（2026-08-28 实测发现的关键污染源）。
+ * 搜索页顶部有「当前选中职位」tag（.cur_selected_job_tag），goto 后**残留上次职位的选中态**
+ * （如上次搜「市政造价员」，本次哪怕关键词填「销售主管」，搜索也锁在市政造价员人才池——
+ * 结果全是被职位过滤后的造价/预结算背景）。本函数：
+ * 1. tag 已等于目标 → 幂等返回 'matched'；
+ * 2. 否则点 tag 打开职位下拉（.talent_search_select_job_dropdown，真实鼠标点击，
+ *    因 DOM .click() 不触发 Vue 绑定），在「搜索词匹配职位/我的职位/组织下职位」分组里
+ *    找 `.job-item-name` 文本匹配关键词的项并点击；
+ * 3. 找不到匹配职位项（人名/技能词搜索）→ grilling 决议（Q9a/Q6c）：**切「不限职位」清池**
+ *    （替代原「warn 保留残留」——根治残留锁池）——除非 fallbackToUnlimited=false
+ *    （--position 且职位卡已找到的异常路径：清池会破坏注入，保留当前范围并 warn）。
+ * @returns JobScopeResult：matched=已锁定目标职位 / unlimited=已切全池 /
+ *          kept=仍停留原范围（切换失败或显式保留）
+ */
+export async function selectJobForKeyword(
+  page: Page,
+  keyword: string,
+  opts: { fallbackToUnlimited?: boolean } = {},
+): Promise<JobScopeResult> {
+  const kw = keyword.trim();
+  const cur = await readJobTagName(page);
+  if (cur === kw) return 'matched'; // 幂等：已选中目标职位
+
+  // 打开职位下拉（真实鼠标点击 tag）
+  if (!(await openJobTagDropdown(page))) {
+    if (cur === '' || cur === '不限职位') return 'unlimited'; // 无法打开但已在全池 = 已清
+    return 'kept';
   }
 
   // 找匹配职位项并点击
-  const picked = await page
-    .evaluate((kw) => {
-      const names = Array.from(document.querySelectorAll('.talent_search_select_job_dropdown .job-item-name'));
-      // 精确匹配优先（trim 后全等）；再退一步包含匹配
-      let n = names.find((x) => (x.textContent || '').trim() === kw);
-      if (!n) n = names.find((x) => (x.textContent || '').includes(kw));
-      const item = n?.closest('.job-item') as HTMLElement | null;
-      if (item) { item.click(); return item.textContent?.trim().slice(0, 30); }
-      return '';
-    }, keyword.trim())
-    .catch(() => '');
+  const picked = await pickJobDropdownItem(page, kw);
   if (picked) {
     await delay(1200 + Math.random() * 600);
-    const now = await page.evaluate((sel) => (document.querySelector(sel)?.textContent || '').trim(), jobNameSel).catch(() => '');
-    if (now === keyword.trim()) {
-      out(`搜索范围已切换至职位「${keyword.trim()}」`);
-    } else {
-      warn(`点击职位项后 tag 未更新（当前「${now || '?'}」），范围可能仍残留`);
+    const now = await readJobTagName(page);
+    if (now === kw) {
+      out(`搜索范围已切换至职位「${kw}」`);
+      return 'matched';
     }
-    return;
+    warn(`点击职位项后 tag 未更新（当前「${now || '?'}」），范围可能仍残留`);
+    return 'kept';
   }
-  // 无匹配职位项：人名/技能词搜索，保留当前范围并提示
-  warn(`职位下拉中无「${keyword.trim()}」项（关键词可能是人名/技能词），按当前范围搜索`);
+
+  // 无匹配职位项：人名/技能词搜索
+  if (opts.fallbackToUnlimited === false) {
+    // 显式职位（--position 且职位管理页已找到卡）：清池会破坏注入校准，保留当前范围并提示
+    warn(`职位下拉中无「${kw}」项（职位管理页已定位到该职位，疑似下拉同步问题），保留当前范围`);
+    return 'kept';
+  }
+  // Q9a/Q6c 决议：匹配不到 → 切「不限职位」清池（根治残留锁池：搜人名/技能词 = 全池，语义正确）
+  const ok = await ensureUnlimitedJob(page);
+  return ok ? 'unlimited' : 'kept';
 }
 
 /** 从卡片文本提取画像（年龄/经验/学历） */

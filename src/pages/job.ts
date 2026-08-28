@@ -126,6 +126,47 @@ export function jobsToRows(jobs: JobPost[]): Row[] {
 export type JobSource = 'auto' | 'delivery' | 'search';
 
 /**
+ * 进入职位管理页并按名定位职位卡，返回卡片 detail 文本（`城市 | 学历 | 年限 | 薪资`）。
+ * 供 readPositionCandidates（投递/搜索分派）与 search --position 自动注入复用（T112 grilling 决议）。
+ * scope 给定则先切对应职位视图 tab（my=我的职位/org=组织下职位）；缺省保持页面当前视图。
+ * @returns bottomInfo detail 文本（可能为空串=卡找到但无 detail 行）；未找到职位卡返回 null
+ */
+export async function resolvePositionCard(
+  page: Page,
+  position: string,
+  opts: { throttle?: Throttle; scope?: JobScope } = {},
+): Promise<string | null> {
+  await assertNoRisk(page, { action: `定位职位「${position}」`, soft: true });
+  if (opts.throttle) await opts.throttle.wait();
+
+  // 1. 进入职位管理页并按名定位职位卡（复用 readPositions 导航，但需拿到卡片 DOM）
+  if (!page.url().includes('/Revision/job-manage')) {
+    out('正在进入职位管理页…');
+    await page.goto('https://ehire.51job.com/Revision/job-manage', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await delay(2500 + Math.random() * 1000);
+  }
+  // 若指定 scope：先切到该职位视图再定位，避免残留 tab 导致定位不到
+  await ensureJobScope(page, opts.scope);
+
+  // 2. 文本匹配职位卡 → 读 detail
+  const items = await page.$$(selectors.job.jobItem).catch(() => []);
+  for (const item of items) {
+    const text = await item.evaluate((el) => el.textContent || '').catch(() => '');
+    if (text.includes(position)) {
+      const detail = await item
+        .evaluate((el, sel) => {
+          const f = el.querySelector(sel) as HTMLElement | null;
+          return f ? (f.textContent || '').trim() : '';
+        }, selectors.job.bottomInfo)
+        .catch(() => '');
+      return detail;
+    }
+  }
+  warn(`未在职位列表中找到「${position}」`);
+  return null;
+}
+
+/**
  * 搜索页「期望工作地」实测（2026-08-28）：输入框 readonly/disabled 不能直填，
  * 但**点击容器会弹出级联选择器**（.eh_cascader_dialog：省→市 两级，热门城市/省级列表）。
  * 因此 city 注入需带省名（`广东省,湛江`），靠以下市→省映射补全；未收录城市跳过。
@@ -177,6 +218,22 @@ export function detailToSearchFilters(detail: string): SearchFilters {
   }
 
   return f;
+}
+
+/**
+ * 合并注入筛选与显式筛选（T112 grilling 决议 Q11a：**显式 > 注入**）。
+ * 只覆盖显式传入（非 undefined）的字段，未传字段保留注入值；无注入时仅返回显式字段。
+ * 供 search --position 命令层使用（注入 = 省得手填的缺省便利，用户显式传参永远最高）。
+ */
+export function mergeSearchFilters(
+  injected: SearchFilters | null,
+  explicit: SearchFilters,
+): SearchFilters {
+  const merged: SearchFilters = injected ? { ...injected } : {};
+  for (const k of Object.keys(explicit) as (keyof SearchFilters)[]) {
+    if (explicit[k] !== undefined) merged[k] = explicit[k];
+  }
+  return merged;
 }
 
 /**
@@ -464,29 +521,10 @@ export async function readPositionCandidates(
   await assertNoRisk(page, { action: `读取职位「${position}」候选人`, soft: true });
   if (opts.throttle) await opts.throttle.wait();
 
-  // 1. 进入职位管理页并按名定位职位卡（复用 readPositions 导航，但需拿到卡片 DOM）
-  if (!page.url().includes('/Revision/job-manage')) {
-    out('正在进入职位管理页…');
-    await page.goto('https://ehire.51job.com/Revision/job-manage', { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await delay(2500 + Math.random() * 1000);
-  }
-  // 若指定 scope：先切到该职位视图再定位，避免残留 tab 导致定位不到
-  await ensureJobScope(page, opts.scope);
-  const items = await page.$$(selectors.job.jobItem).catch(() => []);
-  let target: import('puppeteer-core').ElementHandle<Element> | null = null;
-  for (const item of items) {
-    const text = await item.evaluate((el) => el.textContent || '').catch(() => '');
-    if (text.includes(position)) { target = item; break; }
-  }
-  if (!target) { warn(`未在职位列表中找到「${position}」`); return null; }
-
-  // 读职位卡 detail（`城市 | 学历 | 年限 | 薪资`），供 --source search 注入筛选
-  const detail = await target
-    .evaluate((el, sel) => {
-      const f = el.querySelector(sel) as HTMLElement | null;
-      return f ? (f.textContent || '').trim() : '';
-    }, selectors.job.bottomInfo)
-    .catch(() => '');
+  // 1. 进入职位管理页并按名定位职位卡，读 detail（抽公共 resolvePositionCard）
+  //    —— 找不到职位卡保持原有契约（warn + null）
+  const detail = await resolvePositionCard(page, position, { throttle: opts.throttle, scope: opts.scope });
+  if (detail === null) return null;
 
   const src = opts.source === 'auto' || opts.source === undefined ? undefined : opts.source;
 
@@ -521,6 +559,15 @@ export async function readPositionCandidates(
   }
 
   // ==================== 投递分支（auto 有投递 / 强制 delivery） ====================
+  // 投递入口需要卡片句柄：重新定位目标职位卡（resolve 刚确认存在；scope 切换后 DOM 重渲染过）
+  const items = await page.$$(selectors.job.jobItem).catch(() => []);
+  let target: import('puppeteer-core').ElementHandle<Element> | null = null;
+  for (const item of items) {
+    const text = await item.evaluate((el) => el.textContent || '').catch(() => '');
+    if (text.includes(position)) { target = item; break; }
+  }
+  if (!target) { warn(`未在职位列表中找到「${position}」（页面可能刷新）`); return null; }
+
   // 确认入口：优先「待处理人才数」(.cardNum)，无则当无投递处理（强制 delivery 时 warn）
   const hasNum = (await target.$(selectors.job.cardNum).catch(() => null)) !== null;
   if (!hasNum && src === 'delivery') {

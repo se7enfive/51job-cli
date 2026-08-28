@@ -139,6 +139,29 @@
 - 新增 `--all` 可选全量滚动收集（边慢滚边读，分钟级），但**⚠️ 滚动采集大量人才档案的行为易触发风控**，参数描述已注明「非必要不使用」，不主动测试。
 - **正确定位方式**：候选人的 `resumeId` 是**持久键**——看过的候选人落台账（`~/.51job-cli/ledger/`，0700，含 resumeId/画像/评估），后续任何查看/Hi 走**resumeId 直链**，不依赖搜索排序与虚拟滚动。
 
+### search 命令支持职位/城市参数注入（2026-08-28 grilling 决议，实施中）
+
+**需求**（用户）：`positions --source search` 会注入城市、职位下拉自动选中；单命令 `search` 也要能用参数控制——城市和职位不注入时搜索出的候选人基本不匹配。
+
+**grilling 产出的事实修正**：
+1. `search --city`（期望工作地）在 3cfab72 已修复（级联选择器直选），「search 不支持城市」是 8f377b4 之前老 bug 的残留印象；
+2. 搜索页职位下拉存在**「不限职位」项**（用户确认；既有代码从未使用）——它同时解锁「失败回退落点」与「默认路径清池」两个能力。
+
+**决议（grilling 逐轮确认）**：
+- 新增 `search --position <职位名>`：职位名即搜索词，与位置参数 **互斥**（同传 fail）；`--scope <my|org>` 缺省 `my`，决定职位管理页读卡视图。
+- **自动注入**：`--position` 时先导航职位管理页定位职位卡，读 detail（`城市 | 学历 | 年限 | 薪资`）→ `detailToSearchFilters` 注入期望工作地/学历（年限薪资不转，沿用既有决议）；零城市参数即可收敛。
+- **失败回退**：职位卡未找到 → 切「不限职位」；若未显式 `--city/--residence` → fail（拒绝无收敛裸奔全池）；显式给了城市 → 「不限职位 + 显式城市」继续。
+- **优先级**：显式筛选参数（`--city/--residence/--edu…`）**覆盖**注入值。
+- **注入断供但池已对**（职位卡读到但城市不在 CITY_TO_PROVINCE 映射）：warn 继续，不 fail。
+- **默认路径清池（行为变更）**：无 `--position` 时 `selectJobForKeyword` 匹配不到关键词对应职位 → 切「不限职位」替代原「warn 保留残留」——根治 d6e5a36 只修一半的残留锁池；`--position` 且卡已找到的异常态（下拉同步失败）仍 warn 保留。
+- **可观测性**：`search --json` 输出从纯数组**统一对象化**（用户拍板）：`{ keyword, count, hits, [position, positionScope, injected(city/edu), fallback: 'unlimited'|null] }`——与 `positions --candidates` 的 `{position, source, count, candidates}` 同构；AI 编排消费方需从数组改读 `.hits`。
+- **不做**：`greet`/`inspect` 保持 `--job`（纯关键词兜底）语义，本轮不动。
+
+**实现拆分**：
+- `job.ts`：从 `readPositionCandidates` 抽 `resolvePositionCard(page, name, {throttle, scope}) → detail|null`（导航职位管理页 → 切 scope → 文本匹配职位卡 → 读 bottomInfo），`readPositionCandidates` 与 search 链路共用。
+- `search.ts`：抽 helper `readJobTagName/openJobTagDropdown/pickJobDropdownItem/ensureUnlimitedJob`；`selectJobForKeyword` 返回 `'matched'|'unlimited'|'kept'` 并支持 `fallbackToUnlimited`；`searchTalents` 增 `position`/`fallbackToUnlimited` 入参并透传范围结果。
+- `index.ts`：search 命令 `--position/--scope` 接线、互斥 fail、注入合并（显式>注入）、`{count, hits, ...}` 对象输出。
+
 ## 验收
 
 - [x] `positions --candidates <有投递职位> --json` → `source='delivery'` + 候选人列表（含画像）

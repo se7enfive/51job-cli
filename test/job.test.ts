@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMgmtRow, detailToSearchFilters } from '../src/pages/job';
+import { parseMgmtRow, detailToSearchFilters, mergeSearchFilters } from '../src/pages/job';
 
 describe('parseMgmtRow', () => {
   it('正常画像行：提取年龄/年限/学历/城市，经历作 snippet', () => {
@@ -85,5 +85,49 @@ describe('detailToSearchFilters（职位卡 detail → 搜索筛选）', () => {
     const cityExp = detailToSearchFilters('湛江-霞山区 | 5年及以上'); // 缺学历段
     expect(cityExp.city).toBe('广东省,湛江');
     expect(cityExp.edu).toBeUndefined();
+  });
+});
+
+describe('mergeSearchFilters（T112：显式 > 注入）', () => {
+  const injected = { city: '广东省,湛江', edu: '本科及以上' };
+
+  it('无显式参数 → 注入值原样保留', () => {
+    const m = mergeSearchFilters(injected, {});
+    expect(m.city).toBe('广东省,湛江');
+    expect(m.edu).toBe('本科及以上');
+  });
+
+  it('显式 --city 覆盖注入城市，未传的 edu 保留注入值', () => {
+    const m = mergeSearchFilters(injected, { city: '广东省,深圳' });
+    expect(m.city).toBe('广东省,深圳');
+    expect(m.edu).toBe('本科及以上');
+  });
+
+  it('显式 --edu 覆盖注入学历', () => {
+    const m = mergeSearchFilters(injected, { edu: '硕士及以上' });
+    expect(m.city).toBe('广东省,湛江');
+    expect(m.edu).toBe('硕士及以上');
+  });
+
+  it('显式其它维度（如 salary）与注入共存', () => {
+    const m = mergeSearchFilters(injected, { salary: '8千' });
+    expect(m.salary).toBe('8千');
+    expect(m.city).toBe('广东省,湛江');
+  });
+
+  it('无注入（null）→ 仅显式字段', () => {
+    const m = mergeSearchFilters(null, { city: '广东省,广州' });
+    expect(m).toEqual({ city: '广东省,广州' });
+  });
+
+  it('无注入且无显式 → 空对象', () => {
+    expect(mergeSearchFilters(null, {})).toEqual({});
+  });
+
+  it('显式空串（非 undefined）也视为显式覆盖', () => {
+    // filtersFromOpts 拆 commander：未传字段为 undefined，_ 传了就是 ''（罕见但语义如此）
+    const m = mergeSearchFilters(injected, { city: '' });
+    expect(m.city).toBe('');
+    expect(m.edu).toBe('本科及以上');
   });
 });

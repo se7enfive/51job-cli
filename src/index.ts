@@ -20,7 +20,7 @@ import { navToRecommend, switchRecommendJob, readRecommendResults, greetRecommen
 import { hiOutcomeTag, HiOutcome } from './pages/hi-result';
 import { detailToSummary, openDetailByIndex, hiChatOnDetail } from './pages/candidate-detail';
 import { openTalentMgmtDetail, replyOnDetail, openCardDetail } from './pages/talent-insight';
-import { readPositions, jobsToRows, fetchJd, readPositionCandidates, type JobScope, type JobSource } from './pages/job';
+import { readPositions, jobsToRows, fetchJd, readPositionCandidates, resolvePositionCard, detailToSearchFilters, mergeSearchFilters, type JobScope, type JobSource } from './pages/job';
 import { probePage, printProbe } from './pages/probe';
 import { ensureDirs, root as storeRoot } from './utils/store';
 import { collectExpiredFiles } from './utils/clean';
@@ -223,21 +223,88 @@ program
 
 const searchCmd = program
   .command('search')
-  .description('人才搜索：关键词 + 多维筛选（自动导航到人才搜索页，设置筛选后搜索并读结果列表）。\n支持十三维筛选参数（--exp/--age/--gender/--city/--residence/--edu/--school/--status/--industry/--func/--salary/--work-industry/--work-func）。\n返回候选人画像列表（期望职位/公司/年龄/经验/学历/薪资等）。\ngreet / inspect 也复用本搜索池。默认只读首屏 ~30 人；--all 边慢滚边收集全量（分钟级）。')
-  .argument('<关键词>')
+  .description(
+    '人才搜索：关键词 + 多维筛选（自动导航到人才搜索页，设置筛选后搜索并读结果列表）。\n' +
+      '支持十三维筛选参数（--exp/--age/--gender/--city/--residence/--edu/--school/--status/--industry/--func/--salary/--work-industry/--work-func）。\n' +
+      '定位方式二选一（互斥）：<关键词> 或 --position <职位名>。--position 自动导航职位管理页读职位卡，\n' +
+      '注入该职位的期望工作地/学历筛选并锁定搜索范围——零城市参数即可收敛（显式 --city 等参数覆盖注入值）。\n' +
+      '返回候选人画像列表（期望职位/公司/年龄/经验/学历/薪资等）。\n' +
+      'greet / inspect 也复用本搜索池。默认只读首屏 ~30 人；--all 边慢滚边收集全量（分钟级）。',
+  )
+  .argument('[关键词]', '搜索关键词（职位名/技能词/人名）；与 --position 二选一')
+  .option('--position <职位名>', '按职位搜索：锁定范围为该职位并自动注入其城市/学历筛选（与关键词互斥）')
+  .option('--scope <my|org>', '职位视图（--position 时生效）: my=我的职位(默认), org=组织下职位')
   .option('--all', '滚动收集全量候选人（⚠️ 易触发风控，非必要不使用；默认只读首屏 ~30 人即可）')
-  .option('--json', 'JSON 输出');
+  .option('--json', 'JSON 输出（keyword/count/hits；--position 时含注入元数据）');
 addSearchFilterOptions(searchCmd);
 searchCmd.action(async (keyword, opts) => {
   if (opts.json) setFormat('json');
+  // T112 grilling 决议：<关键词> 与 --position 互斥，同传即调用方语义不清 → fail
+  if (keyword !== undefined && opts.position !== undefined) {
+    fail(`关键词「${keyword}」与 --position 「${opts.position}」互斥，请二选一`);
+  }
+  let scope: JobScope | undefined;
+  if (opts.scope !== undefined) {
+    const s = String(opts.scope).toLowerCase();
+    if (s !== 'my' && s !== 'org') fail(`--scope 只能为 my 或 org，收到: "${opts.scope}"`);
+    scope = s as JobScope;
+  }
+  const kw = (opts.position ?? keyword ?? '').trim();
+  if (!kw) fail('缺少搜索内容：请提供 <关键词> 或 --position <职位名>');
   const throttle = createThrottle(parseThrottleEnv());
-  const filters = filtersFromOpts(opts);
   await runCommand(async (page) => {
-    await searchTalents(page, keyword, { throttle, filters });
+    // ---- --position 注入链路（grilling 决议）----
+    let injected: SearchFilters | null = null;
+    // 显式职位（--position）时：职位卡已找到 → tag 必须锁定，匹配不到视为异常保留（不清池）
+    let fallbackToUnlimited = true;
+    if (opts.position) {
+      const detail = await resolvePositionCard(page, String(opts.position), { throttle, scope });
+      if (detail !== null) {
+        injected = detailToSearchFilters(detail);
+        const note = [
+          injected.city && `期望工作地=${injected.city}`,
+          injected.edu && `学历≥${injected.edu.replace('及以上', '')}`,
+        ].filter(Boolean).join('、');
+        if (note) out(`职位「${opts.position}」自动注入：${note}`);
+        else out(`职位「${opts.position}」已定位，无可用筛选注入`);
+        fallbackToUnlimited = false;
+      } else {
+        // Q8a：职位卡未找到 → 回退「不限职位」，但城市收敛必须是显式的，否则拒绝裸奔全池
+        if (!opts.city && !opts.residence) {
+          fail(`职位「${opts.position}」未在职位列表中找到，且未指定 --city/--residence，拒绝无收敛搜索（可加显式城市后重试）`);
+        }
+        out(`职位「${opts.position}」未在职位列表中找到，按「不限职位」+ 显式城市搜索`);
+      }
+    }
+    // 显式筛选参数覆盖注入值（Q11a 决议：显式 > 注入；未传字段保留注入值）
+    const merged = mergeSearchFilters(injected, filtersFromOpts(opts));
+
+    const scopeResult = await searchTalents(page, kw, {
+      throttle,
+      filters: merged,
+      position: opts.position,
+      fallbackToUnlimited,
+    });
     const hits = await readSearchResults(page, { throttle, all: !!opts.all });
+    // T112 grilling 决议（用户拍板）：--json 统一对象化（与 positions --candidates 同构），
+    // 注入/回退状态可观测——AI 编排从数组改读 .hits
     if (getFormat() === 'json') {
-      printJson(hits);
+      printJson({
+        keyword: kw,
+        ...(opts.position
+          ? {
+              position: String(opts.position),
+              positionScope: scope ?? 'my',
+              injected:
+                injected && (injected.city || injected.edu) ? { ...injected } : null,
+              fallback: scopeResult === 'unlimited' ? 'unlimited' : null,
+            }
+          : {}),
+        count: hits.length,
+        hits,
+      });
     } else {
+      if (scopeResult === 'unlimited') out('搜索范围：不限职位（全池）');
       printTable(searchToRows(hits));
       out(`共 ${hits.length} 条结果`);
     }

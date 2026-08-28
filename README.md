@@ -57,7 +57,7 @@ cp .env.example ~/.51job-cli/.env
 | 命令 | 描述 |
 |---|---|
 | `list [--unread]` | **工作台投递箱**全职位聚合候选人流（不分职位；每人 index/姓名/时间/画像/未读）。序号与 `chat --index` 一致。按职位筛选请用 `positions --candidates`。 |
-| `search <关键词>` | **人才搜索池**查询，支持十三维筛选（`--exp/--age/--gender/--city/--residence/--edu/--school/--status/--industry/--func/--salary/--work-industry/--work-func`），`--json` 输出结构化画像。 |
+| `search <关键词>` | **人才搜索池**查询，支持十三维筛选（`--exp/--age/--gender/--city/--residence/--edu/--school/--status/--industry/--func/--salary/--work-industry/--work-func`），`--json` 输出对象 `{keyword,count,hits,...}`。`--position <职位名>`（与关键词互斥）按你发布的职位搜索：自动注入该职位期望工作地/学历筛选并锁定搜索范围（`--scope my\|org` 选视图），显式 `--city` 等参数覆盖注入值。 |
 | `recommend [岗位]` | **人才望远镜**推荐池（按岗位的系统推荐，不耗点数）。`--greet`/`--inspect` 可直接打招呼/查详情。 |
 | `positions [--candidates <职位名>]` | **职位管理页**在招职位目录；`--candidates` 拉取该职位候选人，`--source <auto\|delivery\|search>` 控制来源（auto=按有无投递分派 / delivery=仅投递 / search=人才池搜索扩充），`--scope <my\|org>` 切视图。 |
 | `jd <名称> [--cat]` | 抓取职位 JD 长文缓存到 `~/.51job-cli/jd/`，`--cat` 直出正文。 |

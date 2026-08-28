@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[T109] 交互安全**：非 TTY 环境或 stdin 关闭（EOF）时遇到打招呼确认等不可逆操作，不再无限挂起，改为立即拒绝；自动化脚本需显式传递 `--no-confirm`。
 - **[T308] 默认拦截收敛**：`collect`/`monitor` 等含埋点类关键词的内部请求，默认仅观察记录不再 204 阻断，避免误杀业务接口导致工具操作被“静默吞噬”。如果已查明确认为埋点的 URL 可按需配置 `51JOB_BLOCK_REPORT_PATTERNS` 阻断。
 - **[T104] `wait-login`**：超时或使用非法 `--timeout` 参数（负数/非数字）时会立即抛错（退出码 1），便于编排区分。
+- **[T112] `search --position`**：按职位搜索（与 `<关键词>` 互斥）——自动导航职位管理页读职位卡，注入期望工作地/学历筛选并锁定搜索范围，零城市参数即可收敛（`--scope my|org` 选视图；显式 `--city` 等参数覆盖注入值；职位卡未找到回退「不限职位」，未显式城市时 fail 拒绝裸奔全池）。
+- **[T112] `search --json` 输出对象化（Breaking）**：从纯数组改为 `{keyword, count, hits, ...}`（`--position` 时含 `position/positionScope/injected/fallback`），注入成败可观测；编排消费方需从数组改读 `.hits`。
+- **[T112] 搜索范围清池**：关键词匹配不到职位时自动切「不限职位」（替代保留上次残留 tag），根治搜索结果锁死旧职位池的问题。
 
 ### Deprecated
 - **[T401]** 环境变量 `RECRUIT_BROWSER_HIDDEN` 被弃用，更名为 `RECRUIT_BROWSER_HEADLESS`（本版本内仍兼容）。
