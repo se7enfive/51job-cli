@@ -96,7 +96,9 @@ async function connectBrowser(port: number): Promise<Browser> {
   const browser = await puppeteer.connect({
     browserURL: `http://127.0.0.1:${port}`,
     defaultViewport: null,
-    protocolTimeout: 30_000,
+    // T306 时序加固：SPA 刷新/级联弹窗渲染时主线程长任务可让 evaluate 排队，
+    // 30s protocolTimeout 偶发误杀（2026-08-28 实测 residence 级联竞态）；提到 90s。
+    protocolTimeout: 90_000,
   });
   return browser;
 }

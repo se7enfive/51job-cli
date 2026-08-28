@@ -278,11 +278,23 @@ async function pickElSelect(page: Page, placeholder: string, value: string): Pro
 /**
  * 应用人才搜索筛选参数（在输入关键词后、点搜索前调用）。
  * 支持三类控件：popover 下拉、dialog 弹窗（多选）、输入框直填。
+ *
+ * 幂等（2026-08-28 实测）：筛选设置过之后按钮 label 会被替换为选中值
+ * （「居住地」→「湛江」「学历要求」→「本科及以上」），再按原 label 找会得到
+ * 「未定位到筛选控件」。因此在点击前先读当前全部 label，若目标值已在其中
+ * 则视为已设置、跳过（避免空转 10s 与 warn 误导）。
  */
 export async function applySearchFilters(page: Page, filters: SearchFilters): Promise<void> {
   // 关闭可能残留的弹窗（前一次命令/交互遗留），避免遮挡筛选控件
   await page.keyboard.press('Escape').catch(() => {});
   await delay(500);
+
+  // 幂等基线：当前已设置的筛选值（按钮 label，如「湛江」「本科及以上」）
+  const appliedLabels = await page
+    .evaluate(() => Array.from(document.querySelectorAll('.base-select-button .base-select-label')).map((x) => (x.textContent || '').trim()))
+    .catch(() => [] as string[]);
+  const alreadyApplied = (value: string): boolean =>
+    appliedLabels.some((l) => l && l === value) || appliedLabels.some((l) => l && l.includes(value));
 
   // 1) popover 式下拉（工作年限/年龄/学历要求/学校性质/期望月薪），多值循环重开
   for (const key of ['exp', 'age', 'edu', 'school', 'salary'] as const) {
@@ -292,6 +304,10 @@ export async function applySearchFilters(page: Page, filters: SearchFilters): Pr
     for (const v of val.split(/[,，]/)) {
       const vv = v.trim();
       if (!vv) continue;
+      if (alreadyApplied(vv)) {
+        out(`筛选「${label} = ${vv}」已设置（幂等跳过）`);
+        continue;
+      }
       out(`设置筛选：${label} = ${vv}`);
       if (!(await clickBaseSelect(page, label))) warn(`未定位到筛选控件「${label}」`);
       await pickPopperOption(page, vv);
@@ -334,14 +350,20 @@ export async function applySearchFilters(page: Page, filters: SearchFilters): Pr
   // 4) 居住地级联（省,市,区）
   if (filters.residence) {
     out(`设置筛选：居住地 = ${filters.residence}`);
-    if (!(await clickBaseSelect(page, '居住地'))) warn(`未定位到筛选控件「居住地」`);
-    for (const level of filters.residence.split(/[,，]/)) {
-      const lv = level.trim();
-      if (!lv) continue;
-      if (!(await pickDialogItem(page, lv))) warn(`居住地级联未找到「${lv}」`);
-      await delay(500);
+    // 幂等：市名已显示在按钮 label（如「湛江」）→ 已设置过，跳过
+    const cityName = filters.residence.split(/[,，]/).pop()?.trim() || filters.residence;
+    if (alreadyApplied(cityName)) {
+      out(`筛选「居住地」已设置（幂等跳过）`);
+    } else {
+      if (!(await clickBaseSelect(page, '居住地'))) warn(`未定位到筛选控件「居住地」`);
+      for (const level of filters.residence.split(/[,，]/)) {
+        const lv = level.trim();
+        if (!lv) continue;
+        if (!(await pickDialogItem(page, lv))) warn(`居住地级联未找到「${lv}」`);
+        await delay(500);
+      }
+      await confirmDialog(page);
     }
-    await confirmDialog(page);
   }
 }
 

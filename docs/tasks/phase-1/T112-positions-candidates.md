@@ -89,12 +89,28 @@
 - 非法 `--source` → `fail`（exit 1）
 
 **真机验证**：
-- `positions --candidates "销售主管" --source search --json` → `source='search'` + **count=30**（远多于 1 投递，自动注入「期望工作地=湛江、学历≥本科」）
+- `positions --candidates "销售主管" --source search --json` → `source='search'` + **count=30**（远多于 1 投递，自动注入「居住地=广东省,湛江、学历≥本科」）
 - `positions --candidates "销售主管" --json`（无 --source）→ `source='delivery'` + count=1（同一人，向后兼容 ✅）
 - `positions --candidates "三维扫描工程师" --source search` → `source='search'`（有投递也强制搜索，覆盖生效）
 - `positions --candidates "三维扫描工程师" --source delivery` → `source='delivery'` + count=34（动态增长）
 - `--source foo` → `--source 只能为 auto/delivery/search` exit 1
 - 新增 `detailToSearchFilters` 6 单测（城市去区级、学历上取、中技/中专跳过、年薪/年限不转、空 detail、缺学历段），72/72 全绿
+
+### 城市筛选修复：期望工作地禁用 → 居住地级联（2026-08-28 实测回访）
+
+**用户实测发现**：销售主管搜索结果**没有湛江人**（30 人全是韶关/广州/惠州等异地）——搜索没带上城市条件。
+
+**根因**（DOM 探测确认）：
+1. 搜索页「期望工作地」输入框被站点置为 **disabled/readonly**（`.talent_search_address input`，仅「去人才」带 jobid 自动预填时才启用；裸 goto 搜索页不可填）。
+2. `applySearchFilters` 对 `--city` 检查 `isInputDisabled` 后 **warn 静默跳过**——之前的「自动注入期望工作地」从未真正生效。
+3. 替代路径探测：筛选区「居住地」下拉可用（`.base-select-button` → `city_cascader_dialog` 级联弹窗，省→市两级，74 省级项），点「广东省」→ 二级含「湛江」。
+
+**修复**：
+- `detailToSearchFilters` 城市段从注入 `city`（期望工作地）改为注入 **`residence`（省,市）**：内置 `CITY_TO_PROVINCE` 市→省映射表（广东全量 + 常见省市；未收录城市跳过宁缺毋错）。
+- `applySearchFilters` 加**幂等**（实测：筛选设置后按钮 label 被选中值替换，「居住地」→「湛江」「学历要求」→「本科及以上」，再按原 label 找不到控件空转 10s）：先读当前按钮 label，目标值已在其中则跳过设置，不再 warn 误导。
+- `core/browser.ts` protocolTimeout 30s → **90s**（SPA 刷新/级联弹窗渲染长任务让 evaluate 排队，30s 偶发误杀）。
+
+**真机验证**：`--source search 销售主管` 连续 3 次稳定 `count=30`，首条候选人「余华利 38岁15年本科 **湛江-麻章区**」——城市收敛生效。73/73 测试全绿。
 
 ## 验收
 

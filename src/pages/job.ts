@@ -126,10 +126,29 @@ export function jobsToRows(jobs: JobPost[]): Row[] {
 export type JobSource = 'auto' | 'delivery' | 'search';
 
 /**
+ * 搜索页「期望工作地」输入框被站点置为只读禁用（2026-08-28 实测：input disabled/readonly，
+ * 仅「去人才」带 jobid 自动预填时才启用，裸 goto 搜索页时不可填）。
+ * 因此城市收敛走「居住地」级联弹窗（cascader：省 → 市），需市→省映射。
+ * 覆盖常见城市；未收录城市直接跳过（不注入筛选，宁缺毋错）。
+ */
+const CITY_TO_PROVINCE: Record<string, string> = {
+  广州: '广东省', 深圳: '广东省', 珠海: '广东省', 汕头: '广东省', 佛山: '广东省',
+  韶关: '广东省', 湛江: '广东省', 肇庆: '广东省', 江门: '广东省', 茂名: '广东省',
+  惠州: '广东省', 梅州: '广东省', 汕尾: '广东省', 河源: '广东省', 阳江: '广东省',
+  清远: '广东省', 东莞: '广东省', 中山: '广东省', 潮州: '广东省', 揭阳: '广东省',
+  云浮: '广东省', 南沙: '广东省',
+  北京: '北京市', 上海: '上海市', 天津: '天津市', 重庆: '重庆市', 杭州: '浙江省',
+  南京: '江苏省', 苏州: '江苏省', 武汉: '湖北省', 长沙: '湖南省', 南昌: '江西省',
+  成都: '四川省', 昆明: '云南省', 南宁: '广西', 桂林: '广西', 柳州: '广西',
+  海口: '海南省', 三亚: '海南省', 福州: '福建省', 厦门: '福建省', 泉州: '福建省',
+};
+
+/**
  * 把职位卡 detail（`城市 | 学历 | 年限 | 薪资`，如「湛江-霞山区 | 本科 | 3年及以上 | 7-12万/年」）
  * 转成人才搜索 SearchFilters，用于 `--source search` 自动注入。
  * 转换原则（grilling 决议）：**能稳定 1:1 转才转，若对不上直接跳过**。
- * - 城市：取市级（去 `-区` 后缀，`湛江-霞山区`→`湛江`），注入 city
+ * - 城市：取市级（去 `-区` 后缀，`湛江-霞山区`→`湛江`），注入 **residence**（省,市 级联）
+ *   ——因为搜索页「期望工作地」输入框被站点禁用（实测），城市收敛只能走居住地级联
  * - 学历：上取为页面枚举（`本科`→`本科及以上`，用户确认向上取扩大合适），注入 edu
  * - 年限：卡上 `3年及以上` 与页面枚举「3-5年/5-10年」槽不符 → 跳过
  * - 薪资：卡上按年 `7-12万/年`，页面按月档位 → 跳过
@@ -139,13 +158,10 @@ export function detailToSearchFilters(detail: string): SearchFilters {
   const segs = (detail || '').split('|').map((s) => s.trim()).filter(Boolean);
   if (segs.length === 0) return f;
 
-  // 城市：首段「市-区」（或纯市），去区级后缀取市级
-  const cityRaw = segs[0];
-  // 形如 广州-天河区 / 湛江-霞山区：取「-」前部分（市级）；无「-」则整段
-  const city = cityRaw.split('-')[0]?.trim();
-  const CITY_SUFFIX = /(市|地区)$/;
-  if (city && !/^[\d.]+$/.test(city)) {
-    f.city = city; // 保留「市」尾（页面期望「广州」类，不额外剥）
+  // 城市：首段「市-区」（或纯市），去区级后缀取市级 → residence（省,市）
+  const city = segs[0].split('-')[0]?.trim();
+  if (city && CITY_TO_PROVINCE[city]) {
+    f.residence = `${CITY_TO_PROVINCE[city]},${city}`;
   }
 
   // 学历：首段后的精确学历词 → 上取枚举；非已知词跳过
@@ -485,7 +501,7 @@ export async function readPositionCandidates(
       await delay(1500 + Math.random() * 800);
     }
     const filters = detailToSearchFilters(detail);
-    const injected = [filters.city && `期望工作地=${filters.city}`, filters.edu && `学历≥${filters.edu.replace('及以上', '')}`]
+    const injected = [filters.residence && `居住地=${filters.residence}`, filters.edu && `学历≥${filters.edu.replace('及以上', '')}`]
       .filter(Boolean)
       .join('、');
     out(`搜索结果关键词「${position}」${injected ? `（自动注入：${injected}）` : '（无可用筛选注入）'}`);
