@@ -20,7 +20,7 @@ import { navToRecommend, switchRecommendJob, readRecommendResults, greetRecommen
 import { hiOutcomeTag, HiOutcome } from './pages/hi-result';
 import { detailToSummary, openDetailByIndex, hiChatOnDetail } from './pages/candidate-detail';
 import { openTalentMgmtDetail, replyOnDetail, openCardDetail } from './pages/talent-insight';
-import { readPositions, jobsToRows, fetchJd } from './pages/job';
+import { readPositions, jobsToRows, fetchJd, readPositionCandidates } from './pages/job';
 import { probePage, printProbe } from './pages/probe';
 import { ensureDirs, root as storeRoot } from './utils/store';
 import { collectExpiredFiles } from './utils/clean';
@@ -148,7 +148,12 @@ program
 
 program
   .command('list')
-  .description('读取候选人/投递列表')
+  .description(
+    '读取工作台【投递箱】候选人列表（全部职位聚合流，不区分职位；' +
+      '返回每个候选人的 index/姓名/投递时间/画像/是否未读）。' +
+      '如需按职位筛投递候选人请用 positions（待处理人才入口），不是本命令。' +
+      '序号与 chat --index 一致。',
+  )
   .option('--unread', '仅未读')
   .option('--json', 'JSON 输出')
   .action(async (opts) => {
@@ -547,12 +552,36 @@ program
 
 program
   .command('positions')
-  .description('读取职位列表')
+  .description(
+    '读取职位列表。加 --candidates <职位名> 拉取某职位的候选人：' +
+      '有投递则新 opens tab 该职位人才管理投递列表（投递来源），无投递则新跳该职位人才搜索（自动预填职位名+期望工作地并搜）。',
+  )
+  .option('--candidates <职位名>', '按职位拉取候选人列表（替代默认职位列表输出）')
   .option('--json', 'JSON 输出')
   .action(async (opts) => {
     if (opts.json) setFormat('json');
     const throttle = createThrottle(parseThrottleEnv());
     await runCommand(async (page) => {
+      if (opts.candidates) {
+        const bid = await getBrowserRef();
+        if (!bid) { fail('浏览器未就绪'); return; }
+        const r = await readPositionCandidates(bid, page, String(opts.candidates), { throttle });
+        if (!r) { fail(`未能读取职位「${opts.candidates}」候选人`); return; }
+        if (getFormat() === 'json') {
+          printJson(r);
+        } else {
+          out(`职位「${r.position}」: ${r.count} 位候选人（来源: ${r.source === 'delivery' ? '投递' : '搜索'}）`);
+          printTable(
+            r.candidates.map((c) => ({
+              '#': c.index,
+              姓名: c.name,
+              画像: [c.age, c.years, c.edu, c.city].filter(Boolean).join('·') || '',
+              摘要: c.snippet || '',
+            })),
+          );
+        }
+        return;
+      }
       const jobs = await readPositions(page, { throttle });
       if (getFormat() === 'json') {
         printJson(jobs);

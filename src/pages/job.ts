@@ -1,10 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { Page } from 'puppeteer-core';
+import type { Browser, Page } from 'puppeteer-core';
 import { assertNoRisk } from '../core/guard';
+import { closePage } from '../core/browser';
 import { delay, Throttle } from '../core/throttle';
 import { out, warn, Row } from '../utils/output';
 import { jdDir } from '../utils/store';
+import { readSearchResults, type SearchHit } from './search';
 import { selectors } from './selectors';
 
 export interface JobPost {
@@ -165,4 +167,207 @@ export async function fetchJd(page: Page, name: string, opts: { throttle?: Throt
   fs.writeFileSync(file, `# ${name}\n\n${jdText}\n`, 'utf-8');
   out(`JD 已缓存: ${file}`);
   return file;
+}
+
+export interface PositionCandidates {
+  position: string;
+  /** 数据来源：delivery=该职位收到的投递（走人才管理列表）；search=无投递，跳人才搜索按职位匹配 */
+  source: 'delivery' | 'search';
+  portal: string;
+  count: number;
+  candidates: Array<{
+    index: number;
+    name: string;
+    age?: string;
+    years?: string;
+    edu?: string;
+    city?: string;
+    snippet?: string;
+  }>;
+}
+
+/** 人才管理行文本 → 画像（结构实测松散，解析失败仅返回空串，不丢弃候选人） */
+export function parseMgmtRow(text: string): {
+  age?: string;
+  years?: string;
+  edu?: string;
+  city?: string;
+  snippet?: string;
+} {
+  const age = text.match(/(\d+)岁/)?.[1];
+  const years = text.match(/(\d+)\s*年(?:经验)?/)?.[1];
+  // 学历：本科/硕士/大专/博士/高中/中专/专科 等常见词
+  const eduMatch =
+    text.match(/(本科|硕士|大专|专科|博士|高中|中专|技校)/)?.[1];
+  // 城市：限定在「首段经历时间戳（YYYY.MM）之前」的画像段内匹配，
+  // 学历词之后的 2-4 字中文=城市。操作/状态词算子与后续经历都在时间戳后，被自然排除。
+  let city = undefined;
+  const head = (text.match(/\d{4}\.\d{2}/)?.index ?? text.length);
+  const preText = text.slice(0, head);
+  const cityM = preText.match(/(?:本科|硕士|大专|专科|博士|高中|中专)\s+([一-龥]{2,})(?:\s|$)/);
+  if (cityM) {
+    const c = cityM[1];
+    if (!/回复|合适|不合适|拨打电话|在线|当前|正在|继续/.test(c)) city = c;
+  }
+  // snippet：经历首条「公司名 • 职位」（或所有经验段），截断 60 字
+  const exp = text
+    .replace(/\s+/g, ' ')
+    .match(/\d{4}\.\d{2}-\d{4}\.\d{2}[^•]*•[^•]*/g);
+  const snippet = exp ? exp[0].trim().slice(0, 60) : undefined;
+  const r: { age?: string; years?: string; edu?: string; city?: string; snippet?: string } = {};
+  if (age) r.age = `${age}岁`;
+  if (years) r.years = `${years}年`;
+  if (eduMatch) r.edu = eduMatch;
+  if (city) r.city = city;
+  if (snippet) r.snippet = snippet;
+  return r;
+}
+
+/** 是否「人才管理投递列表」URL（该职位投递候选人） */
+function isMgmtPortal(u: string): boolean {
+  return u.includes('/Revision/talent/management');
+}
+
+/**
+ * 把人才管理页当前职位候选人行收集为结构化列表（含滚动加载 .main_container）。
+ * 行以「回复」按钮 `.button.tm_button` 为锚，向上找含 `.name` 的行容器（同 talent-insight 的 collectTalentRows）。
+ */
+async function collectMgmtRows(pageToScrape: Page): Promise<Array<{ index: number; name: string; [k: string]: string | number | undefined }>> {
+  // 滚动 .内层容器到最底，触发懒加载（探测：.main_container scrollHeight>clientHeight）
+  for (let i = 0; i < 10; i++) {
+    await pageToScrape
+      .evaluate(() => {
+        for (const el of Array.from(document.querySelectorAll('div'))) {
+          if (el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 200) {
+            el.scrollTop = el.scrollHeight;
+          }
+        }
+        window.scrollTo(0, document.documentElement.scrollHeight);
+      })
+      .catch(() => {});
+    await delay(700 + Math.random() * 500);
+  }
+  const rows = await pageToScrape.evaluate((nameSel, btnSel) => {
+    const out: Array<{ name: string; text: string }> = [];
+    for (const b of Array.from(document.querySelectorAll(btnSel))) {
+      let row: HTMLElement | null = b.parentElement;
+      for (let k = 0; k < 8 && row; k++) {
+        if (row.querySelector(nameSel)) break;
+        row = row.parentElement;
+      }
+      const nameEl = row ? row.querySelector(nameSel) : null;
+      const name = nameEl ? (nameEl.textContent || '').trim() : '';
+      if (!name) continue;
+      // 去重（同一行可能多次命中）
+      if (out.some((o) => o.name === name)) continue;
+      out.push({ name, text: row ? (row.innerText || '') : '' });
+    }
+    return out;
+  }, selectors.talentMgmt.name, 'button.tm_button').catch(() => [] as Array<{ name: string; text: string }>);
+
+  return rows.map((r, i) => {
+    const meta = parseMgmtRow(r.text);
+    return { index: i + 1, name: r.name, text: r.text, ...meta };
+  });
+}
+
+/**
+ * 拉取「某个职位」的候选人：
+ * - 有投递人（职位卡 .jcc_num）→ 点它新 tab 到人才管理页（投递语义），滚动收集全量，source=delivery
+ * - 无投递人（.jcc_num 空）→ 点 .jcc_to_talent_content 新 tab 到人才搜索页（自动预填+搜），source=search
+ * closeCode 收尾关掉新 tab，不影响原 page 上下文。
+ */
+export async function readPositionCandidates(
+  browser: Browser,
+  page: Page,
+  position: string,
+  opts: { throttle?: Throttle } = {},
+): Promise<PositionCandidates | null> {
+  await assertNoRisk(page, { action: `读取职位「${position}」候选人`, soft: true });
+  if (opts.throttle) await opts.throttle.wait();
+
+  // 1. 进入职位管理页并按名定位职位卡（复用 readPositions 导航，但需拿到卡片 DOM）
+  if (!page.url().includes('/Revision/job-manage')) {
+    out('正在进入职位管理页…');
+    await page.goto('https://ehire.51job.com/Revision/job-manage', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await delay(2500 + Math.random() * 1000);
+  }
+  const items = await page.$$(selectors.job.jobItem).catch(() => []);
+  let target: import('puppeteer-core').ElementHandle<Element> | null = null;
+  for (const item of items) {
+    const text = await item.evaluate((el) => el.textContent || '').catch(() => '');
+    if (text.includes(position)) { target = item; break; }
+  }
+  if (!target) { warn(`未在职位列表中找到「${position}」`); return null; }
+
+  // 2. 判定入口：优先「待处理人才数」(.cardNum)，无则「去人才」(.jobToTalent)
+  const hasNum = (await target.$(selectors.job.cardNum).catch(() => null)) !== null;
+  const entrySel = hasNum ? selectors.job.cardNum : selectors.job.jobToTalent;
+  if (opts.throttle) await opts.throttle.wait();
+
+  // 记录点击前页面对象集合（T306 同法：按对象身份判新 tab）
+  const beforePages = new Set<import('puppeteer-core').Page>(
+    (await browser.pages().catch(() => [] as Page[])).filter((p) => !p.isClosed()),
+  );
+
+  // 实际点击：卡片内部的入口元素（cardNum / jobToTalent）
+  const entryHandle = await target.$(entrySel).catch(() => null);
+  if (!entryHandle) { warn('未定位到该职位入口元素'); return null; }
+  await entryHandle.evaluate((el) => {
+    (el as HTMLElement).scrollIntoView({ block: 'center' });
+  }).catch(() => {});
+  await delay(300 + Math.random() * 200);
+  await entryHandle.click().catch(() => {});
+  out(`已点击职位「${position}」${hasNum ? '待处理人才' : '去人才'}入口，等待新 tab…`);
+
+  // 3. 捕获新 tab（轮询 browser.pages()，T306 同法：按事情对象身份判新）
+  const deadline = Date.now() + 15_000;
+  let portal: Page | null = null;
+  while (Date.now() < deadline) {
+    const pages = await browser.pages().catch(() => [] as Page[]);
+    for (const p of pages) {
+      if (p.isClosed() || beforePages.has(p)) continue;
+      let u = ''; try { u = await p.url(); } catch { /* ignore */ }
+      if (u.includes('/Revision/talent/')) { portal = p; break; }
+    }
+    if (portal) break;
+    await delay(500 + Math.random() * 300);
+  }
+  if (!portal) { warn(`未捕获到「${position}」候选人 tab（15s）`); return null; }
+
+  // 4. 按落地 URL 分支收集 + 5. 统一结构化
+  let source: 'delivery' | 'search';
+  let raw: Array<{ name: string; text?: string }> | SearchHit[] = [];
+  let portalUrl = '';
+  try { portalUrl = await portal.url(); } catch { /* ignore */ }
+  if (isMgmtPortal(portalUrl)) {
+    source = 'delivery';
+    await delay(1200 + Math.random() * 800);
+    raw = await collectMgmtRows(portal);
+  } else {
+    source = 'search';
+    await delay(1800 + Math.random() * 800);
+    raw = await readSearchResults(portal, { throttle: opts.throttle });
+  }
+
+  const candidates = raw.map((r, i) =>
+    'text' in r
+      ? { index: i + 1, name: r.name, ...parseMgmtRow(r.text || '') }
+      : {
+          index: i + 1,
+          name: (r as SearchHit).name,
+          age: (r as SearchHit).age ? `${(r as SearchHit).age}岁` : undefined,
+          years: (r as SearchHit).exp ? `${(r as SearchHit).exp}年` : undefined,
+          edu: (r as SearchHit).edu,
+          city: (r as SearchHit).city,
+          snippet: (r as SearchHit).company
+            ? `${(r as SearchHit).company}${(r as SearchHit).job ? ` • ${(r as SearchHit).job}` : ''}`
+            : undefined,
+        },
+  ).filter((c) => c.name);
+
+  // 关掉新 tab，保持原 page 上下文（positions 卡仍在原 tab）
+  try { await portal.close(); } catch { /* ignore */ }
+
+  return { position, source, portal: portalUrl, count: candidates.length, candidates };
 }

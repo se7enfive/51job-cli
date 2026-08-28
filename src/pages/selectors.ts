@@ -187,8 +187,10 @@ export const selectors = {
     jobTag: '.job_tag',
     /** 详情行：地点|学历|经验|薪资 */
     bottomInfo: '.job_bottom_info',
-    /** 待处理人才数 */
+    /** 待处理人才数（有投递人时存在；点击跳该职位人才管理列表） */
     cardNum: '.job_card_num',
+    /** 「去人才」入口（无待处理数的停招/无投递职位也常驻；点击跳该职位人才搜索，自动预填职位名+期望工作地并搜） */
+    jobToTalent: '.job_to_talent_content',
     jdContent: '[class*="jd-content"], [class*="job-desc"], [class*="description"]',
     refreshBtn: '[class*="refresh"], [class*="repost"]',
   },
