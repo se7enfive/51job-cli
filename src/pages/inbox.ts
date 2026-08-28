@@ -47,9 +47,55 @@ async function waitForListSettled(page: Page, itemSel: string, timeoutMs = 18_00
   return prev >= 0 ? prev : 0;
 }
 
-/** 等待候选人卡片稳定渲染后返回当前全部卡片。 */
+/**
+ * 投递箱内部列表容器（.resume-list）是无限滚动/懒加载模式：
+ * 页面 body 不滚动，候选卡由内部容器 overflowY:auto + scroll 到底逐步渲染追加。
+ * 仅 page.$$() 会漏掉未渲染的后续卡片（实测首屏约 1/3，完整列表需滚到底）。
+ *
+ * 滚屏收敛：反复把滚动容器 scrollTop 拉到 scrollHeight（到底），等新卡渲染，
+ * 直到卡片数连续 SCROLL_STABLE_ROUNDS 次不再增长，或达到上限/超时。
+ * 只滚动不排序不改序——追加式加载，卡片顺序即 DOM 顺序（T105 序号契约保持）。
+ */
+const SCROLL_CONTAINER_SEL = '.resume-list';
+const SCROLL_STABLE_ROUNDS = 2; // 连续几次「滚到底无新增」视为收敛
+const SCROLL_MAX_STEPS = 60; // 上限守卫：防异常页面无限滚动
+const SCROLL_MAX_MS = 60_000; // 总时限守卫
+
+async function scrollListToBottom(page: Page, itemSel: string): Promise<void> {
+  const deadline = Date.now() + SCROLL_MAX_MS;
+  let stable = 0;
+  let prev = -1;
+  for (let step = 0; step < SCROLL_MAX_STEPS && Date.now() < deadline; step++) {
+    // 让待渲染卡片先落定，再数数量（模拟真实滚动阅读节奏，降低被识别为工具滚屏的信号）
+    await sleepRandom(LIST_POLL_MS.min, LIST_POLL_MS.max);
+    const n = await page
+      .evaluate(
+        (sel, conSel) => {
+          const el = document.querySelector(conSel) as HTMLElement | null;
+          if (el) el.scrollTop = el.scrollHeight;
+          return document.querySelectorAll(sel).length;
+        },
+        itemSel,
+        SCROLL_CONTAINER_SEL,
+      )
+      .catch(() => 0);
+
+    if (n === prev) {
+      stable++;
+      // 连续两轮到底后卡片数都不再增长 → 列表已加载全量，收敛
+      if (stable >= SCROLL_STABLE_ROUNDS) break;
+    } else {
+      prev = n;
+      stable = 1;
+    }
+  }
+}
+
+/** 等待候选人卡片稳定渲染（并滚到底加载全量）后返回当前全部卡片。 */
 async function collectCards(page: Page, itemSel: string) {
   await waitForListSettled(page, itemSel);
+  // 先滚到底把懒加载的后续卡片都渲染出来，再数一次卡片。
+  await scrollListToBottom(page, itemSel);
   return page.$$(itemSel).catch(() => []);
 }
 
