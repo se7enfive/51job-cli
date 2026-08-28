@@ -258,43 +258,131 @@ function isMgmtPortal(u: string): boolean {
 }
 
 /**
- * 把人才管理页当前职位候选人行收集为结构化列表（含滚动加载 .main_container）。
- * 行以「回复」按钮 `.button.tm_button` 为锚，向上找含 `.name` 的行容器（同 talent-insight 的 collectTalentRows）。
+ * 收集人才管理页「当前职位」候选人，返回按出现顺序、跨页去重后的结构化行。
+ *
+ * 实测（2026-08-28）：人才管理页是**分页列表**（底部 .eh-pagination，total「共 N 条」，每页约 10 人）。
+ * 懒加载跟不上时**快速滚动会出空白卡片**；进页面直接开滚也拿不全。
+ *
+ * 稳定策略（真机验证）：
+ * 1. 进页面**先随机停几秒**，等首屏懒加载稳定；
+ * 2. 把底部**每页条数切到 50**（.el-select--mini 下拉 → “50条/页”），单页最大化、**减少翻页**；
+ * 3. **缓慢渐进滚动**到底：每步小段增量 + 每步 pause 等渲染，杜绝一次性跳底导致的空白卡；
+ * 4. 滚动到底且读数稳定后再**兜底翻页**（数量可能>50，仍需翻）。
+ *
+ * 行以「回复」按钮 `.button.tm_button` 为锚，向上找含 `.name` 的行容器。
+ * 返回 { index, name, text, ...parseMgmtRow }。
  */
 async function collectMgmtRows(pageToScrape: Page): Promise<Array<{ index: number; name: string; [k: string]: string | number | undefined }>> {
-  // 滚动 .内层容器到最底，触发懒加载（探测：.main_container scrollHeight>clientHeight）
-  for (let i = 0; i < 10; i++) {
-    await pageToScrape
-      .evaluate(() => {
-        for (const el of Array.from(document.querySelectorAll('div'))) {
-          if (el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 200) {
-            el.scrollTop = el.scrollHeight;
+  const seen = new Map<string, { name: string; text: string }>();
+
+  const readPage = () =>
+    pageToScrape
+      .evaluate((nameSel, btnSel) => {
+        const out: Array<{ name: string; text: string }> = [];
+        for (const b of Array.from(document.querySelectorAll(btnSel))) {
+          let row: HTMLElement | null = b.parentElement;
+          for (let k = 0; k < 8 && row; k++) {
+            if (row.querySelector(nameSel)) break;
+            row = row.parentElement;
           }
+          const nameEl = row ? row.querySelector(nameSel) : null;
+          const name = nameEl ? (nameEl.textContent || '').trim() : '';
+          if (!name) continue;
+          if (out.some((o) => o.name === name)) continue;
+          out.push({ name, text: row ? (row.innerText || '') : '' });
         }
-        window.scrollTo(0, document.documentElement.scrollHeight);
+        return out;
+      }, selectors.talentMgmt.name, 'button.tm_button')
+      .catch(() => [] as Array<{ name: string; text: string }>);
+
+  const hasNext = () =>
+    pageToScrape
+      .evaluate(() => {
+        const next = document.querySelector('.eh-pagination__btn-next, .eh-pagination__next, button.btn-next') as HTMLElement | null;
+        if (!next) return false;
+        const cls = (next.className || '').toString();
+        return !/(is-disabled|disabled)/.test(cls);
+      })
+      .catch(() => false);
+
+  const clickNext = () =>
+    pageToScrape
+      .evaluate(() => {
+        const next = document.querySelector('.eh-pagination__btn-next, .eh-pagination__next, button.btn-next') as HTMLElement | null;
+        if (next) { (next as HTMLElement).click(); return true; }
+        return false;
+      })
+      .catch(() => false);
+
+  const scrollTopAll = () =>
+    pageToScrape
+      .evaluate(() => {
+        for (const el of Array.from(document.querySelectorAll('div,section'))) {
+          if (el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 200) el.scrollTop = 0;
+        }
+        window.scrollTo(0, 0);
       })
       .catch(() => {});
-    await delay(700 + Math.random() * 500);
-  }
-  const rows = await pageToScrape.evaluate((nameSel, btnSel) => {
-    const out: Array<{ name: string; text: string }> = [];
-    for (const b of Array.from(document.querySelectorAll(btnSel))) {
-      let row: HTMLElement | null = b.parentElement;
-      for (let k = 0; k < 8 && row; k++) {
-        if (row.querySelector(nameSel)) break;
-        row = row.parentElement;
-      }
-      const nameEl = row ? row.querySelector(nameSel) : null;
-      const name = nameEl ? (nameEl.textContent || '').trim() : '';
-      if (!name) continue;
-      // 去重（同一行可能多次命中）
-      if (out.some((o) => o.name === name)) continue;
-      out.push({ name, text: row ? (row.innerText || '') : '' });
-    }
-    return out;
-  }, selectors.talentMgmt.name, 'button.tm_button').catch(() => [] as Array<{ name: string; text: string }>);
 
-  return rows.map((r, i) => {
+  // 1) 进页面先随机停几秒，等首屏懒加载稳定（太快会出空白卡）
+  await delay(3000 + Math.random() * 3000);
+
+  // 2) 每页条数切到 50：点每页下拉 → 弹层选「50条/页」。切失败静默降级（仍走缓慢滚动 + 兜底翻页）。
+  await pageToScrape.evaluate(() => {
+    const sel = document.querySelector('.job_pagination .el-input.el-select, .el-pagination .el-select, .el-select') as HTMLElement | null;
+    if (sel) (sel as HTMLElement).click();
+  }).catch(() => {});
+  await delay(800 + Math.random() * 400);
+  const pickedFifty = await pageToScrape.evaluate(() => {
+    const items = Array.from(document.querySelectorAll('.el-select-dropdown li, .el-select-dropdown__item'));
+    const fifty = items.find((li) => (li.textContent || '').replace(/\s+/g, '').includes('50条'));
+    if (fifty) { (fifty as HTMLElement).click(); return true; }
+    return false;
+  }).catch(() => false);
+  if (pickedFifty) await delay(1500 + Math.random() * 500);
+
+  // 3) 缓慢渐进滚动到底：小步增量 + 每步 pause 等渲染，避免一次性跳底的空白卡
+  await scrollTopAll();
+  await delay(600 + Math.random() * 400);
+  const STEP = 600, MAX_STEPS = 120;
+  let lastLen = -1;
+  for (let step = 0; step < MAX_STEPS; step++) {
+    const pageRows = await readPage();
+    for (const r of pageRows) if (!seen.has(r.name)) seen.set(r.name, r);
+
+    const canScroll = await pageToScrape
+      .evaluate((inc) => {
+        let moved = false;
+        for (const el of Array.from(document.querySelectorAll('div,section'))) {
+          if (el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 200) {
+            const before = el.scrollTop;
+            el.scrollTop += inc;
+            if (el.scrollTop !== before) moved = true;
+          }
+        }
+        const wb = window.scrollY;
+        window.scrollBy(0, inc);
+        if (window.scrollY !== wb) moved = true;
+        return moved;
+      }, STEP)
+      .catch(() => false);
+
+    if (!canScroll && seen.size === lastLen) break;
+    lastLen = seen.size;
+    await delay(900 + Math.random() * 500);
+  }
+
+  // 4) 兜底翻页（数量可能 >50）：每页滚回顶部再读 + 翻页
+  for (let page = 0; page < 40; page++) {
+    const pageRows = await readPage();
+    for (const r of pageRows) if (!seen.has(r.name)) seen.set(r.name, r);
+    if (!(await hasNext())) break;
+    await scrollTopAll();
+    await clickNext();
+    await delay(1200 + Math.random() * 600);
+  }
+
+  return Array.from(seen.values()).map((r, i) => {
     const meta = parseMgmtRow(r.text);
     return { index: i + 1, name: r.name, text: r.text, ...meta };
   });
@@ -302,8 +390,8 @@ async function collectMgmtRows(pageToScrape: Page): Promise<Array<{ index: numbe
 
 /**
  * 拉取「某个职位」的候选人：
- * - 有投递人（职位卡 .jcc_num）→ 点它新 tab 到人才管理页（投递语义），滚动收集全量，source=delivery
- * - 无投递人（.jcc_num 空）→ 点 .jcc_to_talent_content 新 tab 到人才搜索页（自动预填+搜），source=search
+ * - 有投递人（职位卡 .job_card_num）→ 点它新 tab 到人才管理页（投递语义），滚动收集全量，source=delivery
+ * - 无投递人（.job_card_num 空）→ 点 .job_to_talent_content 新 tab 到人才搜索页（自动预填+搜），source=search
  * closeCode 收尾关掉新 tab，不影响原 page 上下文。
  */
 export async function readPositionCandidates(
@@ -351,18 +439,28 @@ export async function readPositionCandidates(
   await entryHandle.click().catch(() => {});
   out(`已点击职位「${position}」${hasNum ? '待处理人才' : '去人才'}入口，等待新 tab…`);
 
-  // 3. 捕获新 tab（轮询 browser.pages()，T306 同法：按事情对象身份判新）
+  // 3. 捕获新 tab（轮询 browser.pages() + CDP target，按对象身份判新，T306 同法）
+  //    稳：点击瞬间 URL 可能是 about:blank，因此先按「新出现的 page 对象」判定，
+  //    拿到对象后再等它 URL 落到 /Revision/talent/，避免仅按 URL 轮询漏掉空 URL 帧。
   const deadline = Date.now() + 15_000;
   let portal: Page | null = null;
   while (Date.now() < deadline) {
     const pages = await browser.pages().catch(() => [] as Page[]);
     for (const p of pages) {
       if (p.isClosed() || beforePages.has(p)) continue;
-      let u = ''; try { u = await p.url(); } catch { /* ignore */ }
-      if (u.includes('/Revision/talent/')) { portal = p; break; }
+      portal = p;
+      break;
     }
     if (portal) break;
     await delay(500 + Math.random() * 300);
+  }
+  // 等待 portal URL 落到人才页（若已 >15s 对象仍在 about:blank，多给它余量）
+  if (portal) {
+    const settled = await portal
+      .waitForFunction(() => location.pathname.includes('/Revision/talent/'), { timeout: 15_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!settled) { warn(`新 tab 未跳到人才页（URL: ${portal.url()}）`); portal = null; }
   }
   if (!portal) { warn(`未捕获到「${position}」候选人 tab（15s）`); return null; }
 
