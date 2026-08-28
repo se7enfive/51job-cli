@@ -408,6 +408,11 @@ export async function searchTalents(
   await delay(300 + Math.random() * 300);
   if (opts.throttle) await opts.throttle.wait();
 
+  // 确保搜索范围是目标职位（2026-08-28 实测：搜索页有「当前选中职位」tag（.cur_selected_job_tag），
+  // goto 后残留上次职位的选中态（如上次搜「市政造价员」就锁死该职位人才池）→ 结果被污染。
+  // 关键词填入后再切——「搜索词匹配职位」分组会随关键词刷新，此时才能匹配到目标项。
+  await selectJobForKeyword(page, keyword);
+
   // 应用筛选参数（点搜索前）
   if (opts.filters) {
     await applySearchFilters(page, opts.filters);
@@ -425,6 +430,63 @@ export async function searchTalents(
   const got = await waitForSelector(page, `${s.resultList} ${s.resultItem}`, 12000);
   if (!got) await waitForSelector(page, s.noResult, 5000);
   await delay(500 + Math.random() * 500);
+}
+
+/**
+ * 把搜索范围切到与关键词匹配的职位（2026-08-28 实测发现的关键污染源）：
+ * 搜索页顶部有「当前选中职位」tag（.cur_selected_job_tag），goto 后**残留上次职位的选中态**
+ * （如上次搜「市政造价员」，本次哪怕关键词填「销售主管」，搜索也锁在市政造价员人才池——
+ * 结果全是被职位过滤后的造价/预结算背景）。本函数在填好关键词后：
+ * 1. 若 tag 已等于关键词 → 幂等跳过；
+ * 2. 否则点 tag 打开职位下拉（.talent_search_select_job_dropdown，真实鼠标点击，
+ *    因 DOM .click() 不触发 Vue 绑定），在「搜索词匹配职位/我的职位/组织下职位」分组里
+ *    找 `.job-item-name` 文本匹配关键词的项并点击；
+ * 3. 找不到匹配职位项（如关键词是人名或技能词）→ warn 提示但**不阻断**（保留当前范围）。
+ */
+async function selectJobForKeyword(page: Page, keyword: string): Promise<void> {
+  const jobNameSel = '.cur_selected_job_tag .cur_selected_job_tag_jobname';
+  const cur = await page.evaluate((sel) => (document.querySelector(sel)?.textContent || '').trim(), jobNameSel).catch(() => '');
+  if (cur === keyword.trim()) return; // 幂等：已选中目标职位
+
+  // 打开职位下拉（真实鼠标点击 tag）
+  const box = await page.evaluate((sel) => {
+    const el = document.querySelector(sel) as HTMLElement | null;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height };
+  }, '.cur_selected_job_tag').catch(() => null);
+  if (box && box.w > 0) {
+    await page.mouse.click(box.x + box.w / 2, box.y + box.h / 2);
+    await delay(800 + Math.random() * 400);
+  } else {
+    warn('未定位到「当前选中职位」控件（搜索范围可能残留）');
+    return;
+  }
+
+  // 找匹配职位项并点击
+  const picked = await page
+    .evaluate((kw) => {
+      const names = Array.from(document.querySelectorAll('.talent_search_select_job_dropdown .job-item-name'));
+      // 精确匹配优先（trim 后全等）；再退一步包含匹配
+      let n = names.find((x) => (x.textContent || '').trim() === kw);
+      if (!n) n = names.find((x) => (x.textContent || '').includes(kw));
+      const item = n?.closest('.job-item') as HTMLElement | null;
+      if (item) { item.click(); return item.textContent?.trim().slice(0, 30); }
+      return '';
+    }, keyword.trim())
+    .catch(() => '');
+  if (picked) {
+    await delay(1200 + Math.random() * 600);
+    const now = await page.evaluate((sel) => (document.querySelector(sel)?.textContent || '').trim(), jobNameSel).catch(() => '');
+    if (now === keyword.trim()) {
+      out(`搜索范围已切换至职位「${keyword.trim()}」`);
+    } else {
+      warn(`点击职位项后 tag 未更新（当前「${now || '?'}」），范围可能仍残留`);
+    }
+    return;
+  }
+  // 无匹配职位项：人名/技能词搜索，保留当前范围并提示
+  warn(`职位下拉中无「${keyword.trim()}」项（关键词可能是人名/技能词），按当前范围搜索`);
 }
 
 /** 从卡片文本提取画像（年龄/经验/学历） */
