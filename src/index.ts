@@ -223,8 +223,9 @@ program
 
 const searchCmd = program
   .command('search')
-  .description('人才搜索：关键词 + 多维筛选（自动导航到人才搜索页，设置筛选后搜索并读结果列表）。\n支持十三维筛选参数（--exp/--age/--gender/--city/--residence/--edu/--school/--status/--industry/--func/--salary/--work-industry/--work-func）。\n返回候选人画像列表（期望职位/公司/年龄/经验/学历/薪资等）。\ngreet / inspect 也复用本搜索池。')
+  .description('人才搜索：关键词 + 多维筛选（自动导航到人才搜索页，设置筛选后搜索并读结果列表）。\n支持十三维筛选参数（--exp/--age/--gender/--city/--residence/--edu/--school/--status/--industry/--func/--salary/--work-industry/--work-func）。\n返回候选人画像列表（期望职位/公司/年龄/经验/学历/薪资等）。\ngreet / inspect 也复用本搜索池。默认只读首屏 ~30 人；--all 边慢滚边收集全量（分钟级）。')
   .argument('<关键词>')
+  .option('--all', '滚动收集全量候选人（⚠️ 易触发风控，非必要不使用；默认只读首屏 ~30 人即可）')
   .option('--json', 'JSON 输出');
 addSearchFilterOptions(searchCmd);
 searchCmd.action(async (keyword, opts) => {
@@ -233,7 +234,7 @@ searchCmd.action(async (keyword, opts) => {
   const filters = filtersFromOpts(opts);
   await runCommand(async (page) => {
     await searchTalents(page, keyword, { throttle, filters });
-    const hits = await readSearchResults(page, { throttle });
+    const hits = await readSearchResults(page, { throttle, all: !!opts.all });
     if (getFormat() === 'json') {
       printJson(hits);
     } else {
@@ -557,6 +558,7 @@ program
   .option('--candidates <职位名>', '按职位拉取候选人列表（替代默认职位列表输出）')
   .option('--scope <my|org>', '职位视图：my=我的职位，org=组织下职位（默认不切，保持页面当前视图）')
   .option('--source <auto|delivery|search>', '候选人来源: auto=按有无投递分派(默认) / delivery=仅投递 / search=人才池搜索')
+  .option('--all', 'source=search 时滚动收集全量候选人（⚠️ 滚动采集易触发风控，非必要不使用；默认只读首屏 ~30 人即可）')
   .option('--json', 'JSON 输出')
   .action(async (opts) => {
     if (opts.json) setFormat('json');
@@ -579,7 +581,7 @@ program
       if (opts.candidates) {
         const bid = await getBrowserRef();
         if (!bid) { fail('浏览器未就绪'); return; }
-        const r = await readPositionCandidates(bid, page, String(opts.candidates), { throttle, scope, source });
+        const r = await readPositionCandidates(bid, page, String(opts.candidates), { throttle, scope, source, all: !!opts.all });
         if (!r) { fail(`未能读取职位「${opts.candidates}」候选人`); return; }
         if (getFormat() === 'json') {
           printJson(r);

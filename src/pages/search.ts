@@ -502,9 +502,150 @@ function parseProfile(text: string): { age?: string; exp?: string; edu?: string 
 }
 
 /**
- * 读取当前搜索结果列表（.list-box 下的 .resume-card 卡片）。
+ * 搜索结果全量收集（2026-08-28 实测虚拟列表）：
+ * 搜索页列表是**虚拟滚动**——DOM 只保留视口 ~30 张卡，滚动时**复用节点替换内容**
+ * （同一 .item.resume-card 节点换姓名/经历），配合分页接口（talent_hunt_resume_list，
+ * page_index/page_size=50）。因此「先滚到底再读 DOM」只会拿到底部 30 张——前面的人全丢。
+ *
+ * 正确姿势：**边慢滚边收集**——每滚一段（真实滚轮，模拟真人阅读节奏），把当前视口
+ * 可见卡片解析并入集合（按姓名去重），再继续滚；滚到底且连续 3 轮不再发现新人即收敛。
+ * 慢节奏 + 随机停顿是为等分页接口响应与渲染（用户实测建议）。
+ *
+ * @returns 按首次发现顺序去重的搜索命中（含画像字段，后续再拼 meta）
  */
-export async function readSearchResults(page: Page, opts: { throttle?: Throttle } = {}): Promise<SearchHit[]> {
+async function collectLoadedSearchCards(
+  page: Page,
+  itemSel: string,
+  cardSels: { expect: string; name: string; company: string; active: string; address: string; expectGray: string; desc: string },
+): Promise<Array<{
+  name: string; expect: string; salary: string; job: string; company: string;
+  active: string; address: string; flag: string; userinfo: string;
+}>> {
+  const STABLE_ROUNDS = 3;      // 连续几轮「滚到底无新人」视为收敛
+  const MAX_STEPS = 400;        // 上限守卫（2289 条 / 每轮 ~10 人 ≈ 230 轮够用）
+  const MAX_MS = 20 * 60_000;   // 总时限守卫 20min
+  const WHEEL_DELTA = 380;      // 每次滚轮像素（约一屏 1/3，真人阅读节奏）
+
+  const seen = new Set<string>();
+  const collected: Array<{
+    name: string; expect: string; salary: string; job: string; company: string;
+    active: string; address: string; flag: string; userinfo: string;
+  }> = [];
+
+  const collectCurrent = async (): Promise<void> => {
+    const rows = await page
+      .evaluate((sel, sels) => {
+        const out: Array<Record<string, string>> = [];
+        const nameSel = sels.name, expectSel = sels.expect, expectGraySel = sels.expectGray;
+        const companySel = sels.company, activeSel = sels.active, addressSel = sels.address, descSel = sels.desc;
+        for (const el of Array.from(document.querySelectorAll(sel))) {
+          const txt = (selector: string) => {
+            const f = el.querySelector(selector);
+            return f ? (f.textContent || '').trim().replace(/\s+/g, ' ') : '';
+          };
+          const name = txt(nameSel);
+          if (!name) continue;
+          let expectRaw0 = txt(expectSel).replace(/^求职意向[:：]?\s*/, '');
+          const flag = txt(expectGraySel).trim();
+          let expectRaw = flag ? expectRaw0.replace(flag, '') : expectRaw0;
+          expectRaw = expectRaw
+            .replace(/（距离[^）]*）/g, '')
+            .replace(/(已转发|来源于推荐|推荐|已聊)$/g, '')
+            .trim();
+          const salaryMatch = expectRaw.match(/(\d+(?:\.\d+)?(?:千|万)?-\d+(?:\.\d+)?(?:千|万)?\/月|面议)/);
+          const salary = salaryMatch ? salaryMatch[1] : '';
+          const jobPart = salary ? expectRaw.replace(salary, '').trim() : expectRaw.trim();
+          const job = jobPart.replace(/^[一-龥·,，、\s]+/, '').trim() || jobPart.trim();
+          out.push({
+            name, expect: expectRaw, salary, job,
+            company: txt(companySel),
+            active: txt(activeSel),
+            address: txt(addressSel),
+            flag,
+            desc: txt(descSel),
+            userinfo: txt('.userinfo'),
+          });
+        }
+        return out;
+      }, itemSel, cardSels)
+      .catch(() => [] as Array<Record<string, string>>);
+    for (const r of rows) {
+      if (r.name && !seen.has(r.name)) {
+        seen.add(r.name);
+        collected.push(r as { name: string; expect: string; salary: string; job: string; company: string; active: string; address: string; flag: string; userinfo: string });
+      }
+    }
+  };
+
+  // 滚回顶部
+  await page.evaluate(() => {
+    for (const el of Array.from(document.querySelectorAll('div,section'))) {
+      if (el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 200) el.scrollTop = 0;
+    }
+    window.scrollTo(0, 0);
+  }).catch(() => {});
+  await delay(800 + Math.random() * 500);
+  await collectCurrent();
+  if (collected.length === 0) return collected;
+
+  // 鼠标悬停到列表区，让滚轮落在可滚动容器上
+  await page.mouse.move(960, 450).catch(() => {});
+  await delay(300);
+
+  const deadline = Date.now() + MAX_MS;
+  let stable = 0;
+  let lastCount = collected.length;
+  for (let step = 0; step < MAX_STEPS && Date.now() < deadline; step++) {
+    // 慢滚一小段（模拟真人阅读节奏），随机停顿等接口响应+渲染
+    await page.mouse.wheel({ deltaY: WHEEL_DELTA + Math.round(Math.random() * 200) }).catch(() => {});
+    await delay(1400 + Math.random() * 900);
+
+    await collectCurrent();
+    if (collected.length === lastCount) {
+      // 此轮无新人：判断是否已到底（再滚一步看 scrollTop 是否还会变）
+      const canScroll = await page
+        .evaluate(() => {
+          let moved = false;
+          for (const el of Array.from(document.querySelectorAll('div,section'))) {
+            if (el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 200) {
+              const before = el.scrollTop;
+              el.scrollTop += 300;
+              if (el.scrollTop !== before) moved = true;
+            }
+          }
+          const wb = window.scrollY;
+          window.scrollBy(0, 300);
+          if (window.scrollY !== wb) moved = true;
+          return moved;
+        })
+        .catch(() => false);
+      if (!canScroll) {
+        stable++;
+        if (stable >= STABLE_ROUNDS) break;
+      } else {
+        stable = 0; // 还能滚但没新人，继续看
+      }
+    } else {
+      lastCount = collected.length;
+      stable = 0;
+    }
+  }
+
+  if (stable < STABLE_ROUNDS && collected.length > 0) {
+    warn(`搜索列表滚动收集达步数/时限上限（已收 ${collected.length} 人），可能未走完全部`);
+  }
+  return collected;
+}
+
+/**
+ * 读取当前搜索结果列表（.list-box 下的 .resume-card 卡片）。
+ * 列表是**虚拟滚动**（DOM 只留视口 ~30 卡，滚动替换内容）。
+ * - 默认（all=false）：只读首屏 ~30 人——形成候选池够用；后续用台账 resumeId 直链操作
+ *   （2026-08-28 决议：全量滚动 20min 代价大且**易触发风控**，先读首屏，需要全量时显式 --all）
+ * - all=true：边慢滚边收集全量（collectLoadedSearchCards，去重合并，可达数百人，
+ *   耗时分钟级；⚠️ 滚动采集行为易被风控识别，非必要不使用）。返回按首次发现顺序的候选人。
+ */
+export async function readSearchResults(page: Page, opts: { throttle?: Throttle; all?: boolean } = {}): Promise<SearchHit[]> {
   await assertNoRisk(page, { action: '读取搜索结果', soft: true });
   if (opts.throttle) await opts.throttle.wait();
 
@@ -517,6 +658,57 @@ export async function readSearchResults(page: Page, opts: { throttle?: Throttle 
     return [];
   }
 
+  // 有滚动空间且显式 --all → 边慢滚边收集全量（虚拟列表）；否则直接读首屏
+  const hasScroll = opts.all
+    ? await page
+        .evaluate(() => {
+          for (const el of Array.from(document.querySelectorAll('div,section'))) {
+            if (el.scrollHeight > el.clientHeight + 50 && el.clientHeight > 200) return true;
+          }
+          return window.scrollY < (document.documentElement.scrollHeight - window.innerHeight - 50);
+        })
+        .catch(() => false)
+    : false;
+
+  if (hasScroll) {
+    const cardSels = {
+      expect: s.expect, name: s.name, company: s.company, active: s.active,
+      address: s.address, expectGray: s.expectGray, desc: s.desc,
+    };
+    const collected = await collectLoadedSearchCards(page, `${s.resultList} ${s.resultItem}`, cardSels);
+    const hits: SearchHit[] = [];
+    for (const r of collected) {
+      const prof = parseProfile(r.userinfo);
+      const meta = [
+        r.address || '',
+        prof.age ? `${prof.age}岁` : '',
+        prof.exp ? `${prof.exp}年` : '',
+        prof.edu || '',
+        r.active || '',
+        r.flag || '',
+        r.salary || '',
+      ]
+        .filter(Boolean)
+        .join(' | ');
+      hits.push({
+        index: hits.length + 1,
+        name: r.name,
+        job: r.job || undefined,
+        company: r.company || undefined,
+        meta,
+        salary: r.salary || undefined,
+        city: r.address || undefined,
+        active: r.active || undefined,
+        flag: r.flag || undefined,
+        age: prof.age,
+        exp: prof.exp,
+        edu: prof.edu,
+      });
+    }
+    return hits;
+  }
+
+  // 无滚动空间 → 直接读 DOM 全部卡（原有逻辑）
   const items = await page.$$(`${s.resultList} ${s.resultItem}`).catch(() => []);
   if (items.length === 0) {
     warn('未定位到搜索结果条目。请确认已执行搜索，或运行 51job probe 校准选择器。');

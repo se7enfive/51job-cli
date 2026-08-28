@@ -130,11 +130,14 @@
 ### 搜索结果首屏限制与 resumeId 直链（2026-08-28 实测边界）
 
 **实测发现**（Hi 银先生过程中）：
-1. 搜索结果接口返回 `total: 2289`（销售主管×湛江×本科 全量），但 **DOM 只渲染首屏 ~30 条**；缩小滚动容器/滚动加载**不触发翻页**（探测确认：滚动后卡片数仍 30，无「加载更多」按钮、无分页控件）。搜索排序随活跃度**动态变化**——同一条件两次搜索返回的 30 人集合可能不同（银先生曾在前 30，后滑出）。
-2. 人才搜索关键词**不按姓名匹配**（搜「银先生」返回无关结果）；`locateCandidate`/`greet` 按姓名定位只对**当前已渲染的 30 条**有效。
-3. **resumeId 直链有效**：`talent/resume/detail?resumeId=<id>`（带 jobId/recommendJobId/fromModule）可直接打开任意候选人详情页（含此前 `inspect`/`talent-detail` 抓到的 resumeId），页面上「立即Hi聊」（`.chat_btn`）可用 `hiChatOnDetail` 发 Hi。这是对「已看过详情、随后滑出首屏」候选人的可靠触达路径。
+1. 搜索结果接口返回 `total: 2289`（销售主管×湛江×本科 全量），但 DOM 是**虚拟滚动**——只保留视口 ~30 张卡，滚动时**复用节点替换内容**（同一 `.item.resume-card` 换姓名/经历），配合分页接口（`talent_hunt_resume_list`，page_index/page_size=50）。「先滚到底再读 DOM」只会拿到底部 30 人，前面的人全丢。
+2. 人才搜索关键词**不按姓名匹配**（搜「银先生」返回无关结果）；`locateCandidate`/`greet` 按姓名定位只对**当前已渲染的 30 条**有效。搜索排序随活跃度**动态变化**——同一条件两次搜索的 30 人集合可能不同（银先生曾在前 30，后滑出）。
+3. **resumeId 直链有效**（推荐路径）：`talent/resume/detail?resumeId=<id>`（带 jobId/recommendJobId/fromModule）可直接打开任意候选人详情页（含此前 `inspect`/`talent-detail` 抓到的 resumeId），页面上「立即Hi聊」（`.chat_btn`）可用 `hiChatOnDetail` 发 Hi——对「已看过详情、随后滑出首屏」的候选人，这是比滚动找回**更快更稳**的触达路径。
 
-**对 Agent 使用的含义**：`positions --candidates --source search` 返回的是**首屏 30 条样本**（非全量 2289）；要做全量候选评估，可用 `inspect`/`talent-detail` 逐条看详情并把 `resumeId` 落台账（本仓库实践：`~/.51job-cli/ledger/`，0700），后续 Hi 用 resumeId 直链，不依赖搜索排序。
+**决策（2026-08-28，用户引导）**：
+- `readSearchResults` 默认**只读首屏 ~30 人**（秒级）——形成候选池足够；**不走全量滚动**。
+- 新增 `--all` 可选全量滚动收集（边慢滚边读，分钟级），但**⚠️ 滚动采集大量人才档案的行为易触发风控**，参数描述已注明「非必要不使用」，不主动测试。
+- **正确定位方式**：候选人的 `resumeId` 是**持久键**——看过的候选人落台账（`~/.51job-cli/ledger/`，0700，含 resumeId/画像/评估），后续任何查看/Hi 走**resumeId 直链**，不依赖搜索排序与虚拟滚动。
 
 ## 验收
 

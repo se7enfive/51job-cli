@@ -459,7 +459,7 @@ export async function readPositionCandidates(
   browser: Browser,
   page: Page,
   position: string,
-  opts: { throttle?: Throttle; scope?: JobScope; source?: JobSource } = {},
+  opts: { throttle?: Throttle; scope?: JobScope; source?: JobSource; all?: boolean } = {},
 ): Promise<PositionCandidates | null> {
   await assertNoRisk(page, { action: `读取职位「${position}」候选人`, soft: true });
   if (opts.throttle) await opts.throttle.wait();
@@ -505,7 +505,7 @@ export async function readPositionCandidates(
       .join('、');
     out(`搜索结果关键词「${position}」${injected ? `（自动注入：${injected}）` : '（无可用筛选注入）'}`);
     await searchTalents(page, position, { filters, throttle: opts.throttle });
-    const hits = await readSearchResults(page, { throttle: opts.throttle });
+    const hits = await readSearchResults(page, { throttle: opts.throttle, all: opts.all });
     const candidates = hits
       .map((h, i) => ({
         index: i + 1,
