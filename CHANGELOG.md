@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.1] - Unreleased
+## [0.1.0] - 2026-08-28
 
 ### Added
 - **[T203]** 新增 `51job clean` 命令用于清理本地生成的 OCR 文本、截图与探针快照。
