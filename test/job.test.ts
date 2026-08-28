@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMgmtRow } from '../src/pages/job';
+import { parseMgmtRow, detailToSearchFilters } from '../src/pages/job';
 
 describe('parseMgmtRow', () => {
   it('正常画像行：提取年龄/年限/学历/城市，经历作 snippet', () => {
@@ -37,5 +37,47 @@ describe('parseMgmtRow', () => {
     // 城市“广州”后紧接经历时间戳，不应被后续经历/按钮干扰
     const r = parseMgmtRow('何敏萍 24岁 3年 大专 武汉 2024.09-2025.01 (4个月) 广西某土地');
     expect(r.city).toBe('武汉');
+  });
+});
+
+describe('detailToSearchFilters（职位卡 detail → 搜索筛选）', () => {
+  it('完整 4 段：城市去区级 + 学历上取', () => {
+    const f = detailToSearchFilters('湛江-霞山区 | 本科 | 3年及以上 | 7-12万/年');
+    expect(f.city).toBe('湛江');
+    expect(f.edu).toBe('本科及以上');
+    // 年限（“3年及以上”与页面枚举槽不符）与年薪均不注入
+    expect(f.exp).toBeUndefined();
+    expect(f.salary).toBeUndefined();
+  });
+
+  it('直辖市区：广州-天河区 → 广州', () => {
+    expect(detailToSearchFilters('广州-天河区 | 大专 | 3年及以上 | 8千-1.5万/月').city).toBe('广州');
+  });
+
+  it('纯市不带区：韶关 → 韶关', () => {
+    const f = detailToSearchFilters('韶关 | 本科 | 2年及以上 | 5千-1万/月');
+    expect(f.city).toBe('韶关');
+  });
+
+  it('学历上取表：大专→大专及以上，硕士→硕士及以上', () => {
+    expect(detailToSearchFilters('A | 大专 | x | y').edu).toBe('大专及以上');
+    expect(detailToSearchFilters('A | 硕士 | x | y').edu).toBe('硕士及以上');
+  });
+
+  it('非标准学历（中技/中专）不映射 → edu 跳过', () => {
+    const f = detailToSearchFilters('广州-天河区 | 中技/中专 | 3年及以上 | 7千-1万/月·13薪');
+    expect(f.edu).toBeUndefined();
+    expect(f.city).toBe('广州');
+  });
+
+  it('只有城市段 / 无学历段 → 仅 city，edu 跳过', () => {
+    expect(detailToSearchFilters('')).toEqual({});
+    expect(detailToSearchFilters('   ')).toEqual({});
+    const onlyCity = detailToSearchFilters('广州-天河区');
+    expect(onlyCity.city).toBe('广州');
+    expect(onlyCity.edu).toBeUndefined();
+    const cityExp = detailToSearchFilters('湛江-霞山区 | 5年及以上'); // 缺学历段
+    expect(cityExp.city).toBe('湛江');
+    expect(cityExp.edu).toBeUndefined();
   });
 });

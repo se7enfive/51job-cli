@@ -74,6 +74,28 @@
 
 真机验证：`--candidates "三维扫描工程师" --scope org --json` → `source='delivery'` + **count=33**（全量）；`--candidates "资深土建造价工程师/经理" --json` → `source='delivery'` + count=10。连续多跑稳定。
 
+### `--source <auto|delivery|search>`：投递不足时去人才池搜索扩充（2026-08-28）
+
+**问题**：投递「少但 >0」的职位（如销售主管=1 投递）原实现硬编码走 delivery，只拿 1 个投递人，无法去人才池补充匹配人才。
+
+**方案**（grilling 决策后实施）：
+- `--source search`：**强制走人才池搜索**。直接 goto 搜索页 + 职位名作关键词，并把职位卡 `detail`（`城市 | 学历 | 年限 | 薪资`）经纯函数 `detailToSearchFilters` 自动注入 `SearchFilters`：
+  - 城市`湛江-霞山区`→去区级取市级→`city`
+  - 学历`本科`→**向上取扩大**`本科及以上`→`edu`（用户确认「学历向上取扩大合适」）
+  - 年限`3年及以上`与页面枚举槽不符、薪资`7-12万/年`按年≠页面按月档位 → **都不转跳过**
+  - 不能稳定 1:1 转的字段一律跳过
+- `--source delivery`：强制只读投递；无投递入口时 warn + 返回 null
+- `--source auto`（缺省）：按有无投递自动分派，**行为与改前完全一致**
+- 非法 `--source` → `fail`（exit 1）
+
+**真机验证**：
+- `positions --candidates "销售主管" --source search --json` → `source='search'` + **count=30**（远多于 1 投递，自动注入「期望工作地=湛江、学历≥本科」）
+- `positions --candidates "销售主管" --json`（无 --source）→ `source='delivery'` + count=1（同一人，向后兼容 ✅）
+- `positions --candidates "三维扫描工程师" --source search` → `source='search'`（有投递也强制搜索，覆盖生效）
+- `positions --candidates "三维扫描工程师" --source delivery` → `source='delivery'` + count=34（动态增长）
+- `--source foo` → `--source 只能为 auto/delivery/search` exit 1
+- 新增 `detailToSearchFilters` 6 单测（城市去区级、学历上取、中技/中专跳过、年薪/年限不转、空 detail、缺学历段），72/72 全绿
+
 ## 验收
 
 - [x] `positions --candidates <有投递职位> --json` → `source='delivery'` + 候选人列表（含画像）

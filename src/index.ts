@@ -20,7 +20,7 @@ import { navToRecommend, switchRecommendJob, readRecommendResults, greetRecommen
 import { hiOutcomeTag, HiOutcome } from './pages/hi-result';
 import { detailToSummary, openDetailByIndex, hiChatOnDetail } from './pages/candidate-detail';
 import { openTalentMgmtDetail, replyOnDetail, openCardDetail } from './pages/talent-insight';
-import { readPositions, jobsToRows, fetchJd, readPositionCandidates, type JobScope } from './pages/job';
+import { readPositions, jobsToRows, fetchJd, readPositionCandidates, type JobScope, type JobSource } from './pages/job';
 import { probePage, printProbe } from './pages/probe';
 import { ensureDirs, root as storeRoot } from './utils/store';
 import { collectExpiredFiles } from './utils/clean';
@@ -554,10 +554,12 @@ program
   .command('positions')
   .description(
     '读取职位列表。加 --candidates <职位名> 拉取某职位的候选人：' +
-      '有投递则新 opens tab 该职位人才管理投递列表（投递来源），无投递则新跳该职位人才搜索（自动预填职位名+期望工作地并搜）。',
+      '有投递则新 opens tab 该职位人才管理投递列表（投递来源），无投递则新跳该职位人才搜索（自动预填职位名+期望工作地并搜）。' +
+      '加 --source search 强制走人才池搜索（投递少时扩充候选）。',
   )
   .option('--candidates <职位名>', '按职位拉取候选人列表（替代默认职位列表输出）')
   .option('--scope <my|org>', '职位视图：my=我的职位，org=组织下职位（默认不切，保持页面当前视图）')
+  .option('--source <auto|delivery|search>', '候选人来源: auto=按有无投递分派(默认) | delivery=仅投递 | search=人才池搜索')
   .option('--json', 'JSON 输出')
   .action(async (opts) => {
     if (opts.json) setFormat('json');
@@ -568,12 +570,19 @@ program
       if (s !== 'my' && s !== 'org') fail(`--scope 只能为 my 或 org，收到: "${opts.scope}"`);
       scope = s as JobScope;
     }
+    // source 校验：只允许 auto / delivery / search
+    let source: JobSource | undefined;
+    if (opts.source !== undefined) {
+      const v = String(opts.source).toLowerCase();
+      if (v !== 'auto' && v !== 'delivery' && v !== 'search') fail(`--source 只能为 auto/delivery/search，收到: "${opts.source}"`);
+      source = v === 'auto' ? undefined : (v as JobSource);
+    }
     const throttle = createThrottle(parseThrottleEnv());
     await runCommand(async (page) => {
       if (opts.candidates) {
         const bid = await getBrowserRef();
         if (!bid) { fail('浏览器未就绪'); return; }
-        const r = await readPositionCandidates(bid, page, String(opts.candidates), { throttle, scope });
+        const r = await readPositionCandidates(bid, page, String(opts.candidates), { throttle, scope, source });
         if (!r) { fail(`未能读取职位「${opts.candidates}」候选人`); return; }
         if (getFormat() === 'json') {
           printJson(r);

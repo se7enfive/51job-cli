@@ -6,7 +6,7 @@ import { closePage } from '../core/browser';
 import { delay, Throttle } from '../core/throttle';
 import { out, warn, Row } from '../utils/output';
 import { jdDir } from '../utils/store';
-import { readSearchResults, type SearchHit } from './search';
+import { readSearchResults, searchTalents, type SearchFilters } from './search';
 import { selectors } from './selectors';
 
 export interface JobPost {
@@ -120,6 +120,48 @@ export function jobsToRows(jobs: JobPost[]): Row[] {
     详情: j.detail || '',
     待处理: j.applicants ? `${j.applicants}人` : '',
   }));
+}
+
+/** 候选人来源：auto=按有无投递分派（默认，改前行为）；delivery=强制仅投递；search=强制人才池搜索 */
+export type JobSource = 'auto' | 'delivery' | 'search';
+
+/**
+ * 把职位卡 detail（`城市 | 学历 | 年限 | 薪资`，如「湛江-霞山区 | 本科 | 3年及以上 | 7-12万/年」）
+ * 转成人才搜索 SearchFilters，用于 `--source search` 自动注入。
+ * 转换原则（grilling 决议）：**能稳定 1:1 转才转，若对不上直接跳过**。
+ * - 城市：取市级（去 `-区` 后缀，`湛江-霞山区`→`湛江`），注入 city
+ * - 学历：上取为页面枚举（`本科`→`本科及以上`，用户确认向上取扩大合适），注入 edu
+ * - 年限：卡上 `3年及以上` 与页面枚举「3-5年/5-10年」槽不符 → 跳过
+ * - 薪资：卡上按年 `7-12万/年`，页面按月档位 → 跳过
+ */
+export function detailToSearchFilters(detail: string): SearchFilters {
+  const f: SearchFilters = {};
+  const segs = (detail || '').split('|').map((s) => s.trim()).filter(Boolean);
+  if (segs.length === 0) return f;
+
+  // 城市：首段「市-区」（或纯市），去区级后缀取市级
+  const cityRaw = segs[0];
+  // 形如 广州-天河区 / 湛江-霞山区：取「-」前部分（市级）；无「-」则整段
+  const city = cityRaw.split('-')[0]?.trim();
+  const CITY_SUFFIX = /(市|地区)$/;
+  if (city && !/^[\d.]+$/.test(city)) {
+    f.city = city; // 保留「市」尾（页面期望「广州」类，不额外剥）
+  }
+
+  // 学历：首段后的精确学历词 → 上取枚举；非已知词跳过
+  const eduMap: Record<string, string> = {
+    大专: '大专及以上',
+    本科: '本科及以上',
+    硕士: '硕士及以上',
+    博士: '博士',
+  };
+  const eduSeg = segs[1];
+  if (eduSeg) {
+    const hit = ['博士', '硕士', '本科', '大专'].find((k) => eduSeg.includes(k));
+    if (hit && eduMap[hit]) f.edu = eduMap[hit];
+  }
+
+  return f;
 }
 
 /**
@@ -389,16 +431,20 @@ async function collectMgmtRows(pageToScrape: Page): Promise<Array<{ index: numbe
 }
 
 /**
- * 拉取「某个职位」的候选人：
- * - 有投递人（职位卡 .job_card_num）→ 点它新 tab 到人才管理页（投递语义），滚动收集全量，source=delivery
- * - 无投递人（.job_card_num 空）→ 点 .job_to_talent_content 新 tab 到人才搜索页（自动预填+搜），source=search
- * closeCode 收尾关掉新 tab，不影响原 page 上下文。
+ * 拉取「某个职位」的候选人。
+ * 来源由 opts.source 控制（JobSource）：
+ * - 'search'：**强制走人才池搜索**，投递少时扩充候选。直接 goto 搜索页 + 职位名作关键词，
+ *   并把职位卡 detail（城市/学历）注入 SearchFilters 自动收敛范围。
+ * - 'delivery'：强制只读投递（该职位收到的候选人投递列表；若无投递入口则 warn 返回 null）
+ * - undefined/'auto'（默认）：按职位卡有无投递人自动分派 —— 有投递点「待处理数」走投递，
+ *   无投递点「去人才」走搜索（原有行为不变）。
+ * 临时 tab 收尾关闭，不影响原 page 上下文。
  */
 export async function readPositionCandidates(
   browser: Browser,
   page: Page,
   position: string,
-  opts: { throttle?: Throttle; scope?: JobScope } = {},
+  opts: { throttle?: Throttle; scope?: JobScope; source?: JobSource } = {},
 ): Promise<PositionCandidates | null> {
   await assertNoRisk(page, { action: `读取职位「${position}」候选人`, soft: true });
   if (opts.throttle) await opts.throttle.wait();
@@ -419,9 +465,54 @@ export async function readPositionCandidates(
   }
   if (!target) { warn(`未在职位列表中找到「${position}」`); return null; }
 
-  // 2. 判定入口：优先「待处理人才数」(.cardNum)，无则「去人才」(.jobToTalent)
+  // 读职位卡 detail（`城市 | 学历 | 年限 | 薪资`），供 --source search 注入筛选
+  const detail = await target
+    .evaluate((el, sel) => {
+      const f = el.querySelector(sel) as HTMLElement | null;
+      return f ? (f.textContent || '').trim() : '';
+    }, selectors.job.bottomInfo)
+    .catch(() => '');
+
+  const src = opts.source === 'auto' || opts.source === undefined ? undefined : opts.source;
+
+  // ==================== 强制搜索分支 ====================
+  // 不管有无投递，直接 goto 搜索页，以职位名为关键词 + 读卡 detail 自动注入筛选
+  if (src === 'search') {
+    const s = selectors.search;
+    if (!page.url().includes('/Revision/talent/search')) {
+      out('正在进入人才搜索页…');
+      await page.goto(s.url, { waitUntil: 'networkidle2', timeout: 60_000 });
+      await delay(1500 + Math.random() * 800);
+    }
+    const filters = detailToSearchFilters(detail);
+    const injected = [filters.city && `期望工作地=${filters.city}`, filters.edu && `学历≥${filters.edu.replace('及以上', '')}`]
+      .filter(Boolean)
+      .join('、');
+    out(`搜索结果关键词「${position}」${injected ? `（自动注入：${injected}）` : '（无可用筛选注入）'}`);
+    await searchTalents(page, position, { filters, throttle: opts.throttle });
+    const hits = await readSearchResults(page, { throttle: opts.throttle });
+    const candidates = hits
+      .map((h, i) => ({
+        index: i + 1,
+        name: h.name,
+        age: h.age ? `${h.age}岁` : undefined,
+        years: h.exp ? `${h.exp}年` : undefined,
+        edu: h.edu,
+        city: h.city,
+        snippet: h.company ? `${h.company}${h.job ? ` • ${h.job}` : ''}` : undefined,
+      }))
+      .filter((c) => c.name);
+    return { position, source: 'search', portal: page.url(), count: candidates.length, candidates };
+  }
+
+  // ==================== 投递分支（auto 有投递 / 强制 delivery） ====================
+  // 确认入口：优先「待处理人才数」(.cardNum)，无则当无投递处理（强制 delivery 时 warn）
   const hasNum = (await target.$(selectors.job.cardNum).catch(() => null)) !== null;
-  const entrySel = hasNum ? selectors.job.cardNum : selectors.job.jobToTalent;
+  if (!hasNum && src === 'delivery') {
+    warn(`职位「${position}」无投递入口（.job_card_num 不存在），强制 delivery 无候选人可读`);
+    return null;
+  }
+  const entrySel = selectors.job.cardNum;
   if (opts.throttle) await opts.throttle.wait();
 
   // 记录点击前页面对象集合（T306 同法：按对象身份判新 tab）
@@ -429,15 +520,19 @@ export async function readPositionCandidates(
     (await browser.pages().catch(() => [] as Page[])).filter((p) => !p.isClosed()),
   );
 
-  // 实际点击：卡片内部的入口元素（cardNum / jobToTalent）
+  // 实际点击：卡片内部的「待处理人数」入口
   const entryHandle = await target.$(entrySel).catch(() => null);
-  if (!entryHandle) { warn('未定位到该职位入口元素'); return null; }
+  if (!entryHandle) {
+    // auto 且无投递 → 改走搜索（保持原有「去人才」语义）
+    warn(`职位「${position}」无待处理入口，改走搜索…`);
+    return readPositionCandidates(browser, page, position, { throttle: opts.throttle, scope: opts.scope, source: 'search' });
+  }
   await entryHandle.evaluate((el) => {
     (el as HTMLElement).scrollIntoView({ block: 'center' });
   }).catch(() => {});
   await delay(300 + Math.random() * 200);
   await entryHandle.click().catch(() => {});
-  out(`已点击职位「${position}」${hasNum ? '待处理人才' : '去人才'}入口，等待新 tab…`);
+  out(`已点击职位「${position}」待处理人才入口，等待新 tab…`);
 
   // 3. 捕获新 tab（轮询 browser.pages() + CDP target，按对象身份判新，T306 同法）
   //    稳：点击瞬间 URL 可能是 about:blank，因此先按「新出现的 page 对象」判定，
@@ -465,38 +560,18 @@ export async function readPositionCandidates(
   if (!portal) { warn(`未捕获到「${position}」候选人 tab（15s）`); return null; }
 
   // 4. 按落地 URL 分支收集 + 5. 统一结构化
-  let source: 'delivery' | 'search';
-  let raw: Array<{ name: string; text?: string }> | SearchHit[] = [];
-  let portalUrl = '';
-  try { portalUrl = await portal.url(); } catch { /* ignore */ }
+  const portalUrl = portal.url();
   if (isMgmtPortal(portalUrl)) {
-    source = 'delivery';
     await delay(1200 + Math.random() * 800);
-    raw = await collectMgmtRows(portal);
-  } else {
-    source = 'search';
-    await delay(1800 + Math.random() * 800);
-    raw = await readSearchResults(portal, { throttle: opts.throttle });
+    const raw = await collectMgmtRows(portal);
+    const candidates = raw
+      .map((r, i) => ({ index: i + 1, name: String(r.name), ...parseMgmtRow(String(r.text || '')) }))
+      .filter((c) => c.name);
+    try { await portal.close(); } catch { /* ignore */ }
+    return { position, source: 'delivery', portal: portalUrl, count: candidates.length, candidates };
   }
 
-  const candidates = raw.map((r, i) =>
-    'text' in r
-      ? { index: i + 1, name: r.name, ...parseMgmtRow(r.text || '') }
-      : {
-          index: i + 1,
-          name: (r as SearchHit).name,
-          age: (r as SearchHit).age ? `${(r as SearchHit).age}岁` : undefined,
-          years: (r as SearchHit).exp ? `${(r as SearchHit).exp}年` : undefined,
-          edu: (r as SearchHit).edu,
-          city: (r as SearchHit).city,
-          snippet: (r as SearchHit).company
-            ? `${(r as SearchHit).company}${(r as SearchHit).job ? ` • ${(r as SearchHit).job}` : ''}`
-            : undefined,
-        },
-  ).filter((c) => c.name);
-
-  // 关掉新 tab，保持原 page 上下文（positions 卡仍在原 tab）
+  // 落到非人才管理页（理论上不会到这）：回退用原 page 搜索
   try { await portal.close(); } catch { /* ignore */ }
-
-  return { position, source, portal: portalUrl, count: candidates.length, candidates };
+  return await readPositionCandidates(browser, page, position, { throttle: opts.throttle, scope: opts.scope, source: 'search' });
 }
