@@ -41,9 +41,9 @@ describe('parseMgmtRow', () => {
 });
 
 describe('detailToSearchFilters（职位卡 detail → 搜索筛选）', () => {
-  it('完整 4 段：城市→居住地级联 + 学历上取', () => {
+  it('完整 4 段：城市→期望工作地级联 + 学历上取', () => {
     const f = detailToSearchFilters('湛江-霞山区 | 本科 | 3年及以上 | 7-12万/年');
-    expect(f.residence).toBe('广东省,湛江'); // 期望工作地输入框被站点禁用，城市走居住地级联
+    expect(f.city).toBe('广东省,湛江'); // 期望工作地带省名（级联需省→市）
     expect(f.edu).toBe('本科及以上');
     // 年限（“3年及以上”与页面枚举槽不符）与年薪均不注入
     expect(f.exp).toBeUndefined();
@@ -51,17 +51,17 @@ describe('detailToSearchFilters（职位卡 detail → 搜索筛选）', () => {
   });
 
   it('直辖市区：广州-天河区 → 广东,广州', () => {
-    expect(detailToSearchFilters('广州-天河区 | 大专 | 3年及以上 | 8千-1.5万/月').residence).toBe('广东省,广州');
+    expect(detailToSearchFilters('广州-天河区 | 大专 | 3年及以上 | 8千-1.5万/月').city).toBe('广东省,广州');
   });
 
   it('纯市不带区：韶关 → 广东,韶关', () => {
     const f = detailToSearchFilters('韶关 | 本科 | 2年及以上 | 5千-1万/月');
-    expect(f.residence).toBe('广东省,韶关');
+    expect(f.city).toBe('广东省,韶关');
   });
 
   it('未收录城市（映射表外）→ 城市跳过不注入', () => {
     const f = detailToSearchFilters('赣州-信丰县 | 本科 | 3年及以上 | 5千-1万/月');
-    expect(f.residence).toBeUndefined();
+    expect(f.city).toBeUndefined();
     expect(f.edu).toBe('本科及以上');
   });
 
@@ -73,17 +73,17 @@ describe('detailToSearchFilters（职位卡 detail → 搜索筛选）', () => {
   it('非标准学历（中技/中专）不映射 → edu 跳过', () => {
     const f = detailToSearchFilters('广州-天河区 | 中技/中专 | 3年及以上 | 7千-1万/月·13薪');
     expect(f.edu).toBeUndefined();
-    expect(f.residence).toBe('广东省,广州');
+    expect(f.city).toBe('广东省,广州');
   });
 
-  it('只有城市段 / 无学历段 → 仅 residence，edu 跳过', () => {
+  it('只有城市段 / 无学历段 → 仅 city，edu 跳过', () => {
     expect(detailToSearchFilters('')).toEqual({});
     expect(detailToSearchFilters('   ')).toEqual({});
     const onlyCity = detailToSearchFilters('广州-天河区');
-    expect(onlyCity.residence).toBe('广东省,广州');
+    expect(onlyCity.city).toBe('广东省,广州');
     expect(onlyCity.edu).toBeUndefined();
     const cityExp = detailToSearchFilters('湛江-霞山区 | 5年及以上'); // 缺学历段
-    expect(cityExp.residence).toBe('广东省,湛江');
+    expect(cityExp.city).toBe('广东省,湛江');
     expect(cityExp.edu).toBeUndefined();
   });
 });

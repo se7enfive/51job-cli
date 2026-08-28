@@ -96,21 +96,23 @@
 - `--source foo` → `--source 只能为 auto/delivery/search` exit 1
 - 新增 `detailToSearchFilters` 6 单测（城市去区级、学历上取、中技/中专跳过、年薪/年限不转、空 detail、缺学历段），72/72 全绿
 
-### 城市筛选修复：期望工作地禁用 → 居住地级联（2026-08-28 实测回访）
+### 城市筛选修复：期望工作地禁用误判 → 级联选择器直选（2026-08-28 实测回访）
 
 **用户实测发现**：销售主管搜索结果**没有湛江人**（30 人全是韶关/广州/惠州等异地）——搜索没带上城市条件。
 
-**根因**（DOM 探测确认）：
-1. 搜索页「期望工作地」输入框被站点置为 **disabled/readonly**（`.talent_search_address input`，仅「去人才」带 jobid 自动预填时才启用；裸 goto 搜索页不可填）。
-2. `applySearchFilters` 对 `--city` 检查 `isInputDisabled` 后 **warn 静默跳过**——之前的「自动注入期望工作地」从未真正生效。
-3. 替代路径探测：筛选区「居住地」下拉可用（`.base-select-button` → `city_cascader_dialog` 级联弹窗，省→市两级，74 省级项），点「广东省」→ 二级含「湛江」。
+**第一版根因判断（误）**：探测到「期望工作地」input 是 `readonly/disabled`，判定为「站点禁用」→ 改用居住地级联（residence）。虽能收敛（居住地=湛江），但语义是「现居所」而非「期望工作地」，且依赖市→省映射表。
 
-**修复**：
-- `detailToSearchFilters` 城市段从注入 `city`（期望工作地）改为注入 **`residence`（省,市）**：内置 `CITY_TO_PROVINCE` 市→省映射表（广东全量 + 常见省市；未收录城市跳过宁缺毋错）。
-- `applySearchFilters` 加**幂等**（实测：筛选设置后按钮 label 被选中值替换，「居住地」→「湛江」「学历要求」→「本科及以上」，再按原 label 找不到控件空转 10s）：先读当前按钮 label，目标值已在其中则跳过设置，不再 warn 误导。
-- `core/browser.ts` protocolTimeout 30s → **90s**（SPA 刷新/级联弹窗渲染长任务让 evaluate 排队，30s 偶发误杀）。
+**用户纠正（正确）**：期望工作地在页面**可点可选**。重新探测确认：
+- input readonly/disabled 只是**防手打**，点击容器（`.talent_search_address`）会弹出**级联选择器**（`.eh_cascader_dialog`：热门城市/省级列表 → 市级）；
+- 之前误判是因为最初探测用了 DOM `.click()`（8 次探测脚本全用的 evaluate click 不触发 Vue 绑定），而真正生效需要真实交互路径——用户动手点过才知道真相。
 
-**真机验证**：`--source search 销售主管` 连续 3 次稳定 `count=30`，首条候选人「余华利 38岁15年本科 **湛江-麻章区**」——城市收敛生效。73/73 测试全绿。
+**最终修复**：
+- `applySearchFilters` city 分支：从 `fillInputByPlaceholder`（直填被 readonly 挡）改为 **`pickCityByCascader`**：点容器 → 级联弹窗逐级选（省→市）→ 确定；幂等（input 已回显目标市则跳过）。
+- `detailToSearchFilters` 城市段输出 `city: '省,市'`（带省名，级联需省→市两级；`CITY_TO_PROVINCE` 映射补全）。
+- 删除死代码 `fillInputByPlaceholder` / `isInputDisabled`（T304）。
+- `core/browser.ts` protocolTimeout 30s → 90s（SPA 级联渲染长任务让 evaluate 排队，30s 偶发误杀）。
+
+**真机验证**：`--source search 销售主管` 注入「期望工作地=广东省,湛江」，结果 30 人全为省内（湛江霞山/赤坎/麻章/吴川 + 广州/深圳少数），首条「邓仁乾 广州-番禺区」；幂等第二次跳过。73/73 测试全绿。
 
 ## 验收
 

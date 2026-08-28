@@ -200,40 +200,39 @@ async function pickPopperOption(page: Page, option: string): Promise<boolean> {
   return false;
 }
 
-/** 按 placeholder 定位输入框并原生 setter 输入（Vue 响应：input + change + 失焦确认） */
-async function fillInputByPlaceholder(page: Page, placeholder: string, value: string): Promise<boolean> {
-  const ok = await page
-    .evaluate(
-      ({ ph, val }) => {
-        const inputs = Array.from(document.querySelectorAll('input'));
-        const el = inputs.find((i) => i.getAttribute('placeholder') === ph);
-        if (el && el instanceof HTMLInputElement && !el.disabled) {
-          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-          if (setter) setter.call(el, val);
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          // 失焦触发 Vue 提交
-          el.blur();
-          return true;
-        }
-        return false;
-      },
-      { ph: placeholder, val: value }
-    )
-    .catch(() => false);
-  await delay(300 + Math.random() * 200);
-  return ok;
-}
+/**
+ * 「期望工作地」级联选择（2026-08-28 实测校正）：
+ * 搜索页头部期望工作地输入框是 **readonly/disabled 只读**，不能直填；
+ * 正确交互是点击容器（.talent_search_address）弹出级联弹窗（.eh_cascader_dialog），
+ * 逐级点省/市（li.cascader_panel_item）再点「确定」。
+ * @param levels 省/市级联序列，如 ['广东省','湛江'] 或 ['湛江']（只有市级时第一级找不到会在第二级命中）
+ */
+async function pickCityByCascader(page: Page, levels: string[]): Promise<void> {
+  // 幂等：输入框已回显目标市 → 跳过
+  const cur = await page.evaluate(() => (document.querySelector('.talent_search_address input') as HTMLInputElement | null)?.value || '').catch(() => '');
+  const targetCity = levels[levels.length - 1] || '';
+  if (cur.trim() === targetCity) {
+    out(`筛选「期望工作地 = ${targetCity}」已设置（幂等跳过）`);
+    return;
+  }
 
-/** 检查按 placeholder 定位的输入框是否禁用 */
-async function isInputDisabled(page: Page, placeholder: string): Promise<boolean> {
-  return page
-    .evaluate((ph) => {
-      const inputs = Array.from(document.querySelectorAll('input'));
-      const el = inputs.find((i) => i.getAttribute('placeholder') === ph);
-      return el ? el.disabled : true;
-    }, placeholder)
-    .catch(() => true);
+  // 点容器打开弹窗
+  const opened = await page
+    .evaluate(() => {
+      const el = document.querySelector('.talent_search_address, .talent_search_address_elinput') as HTMLElement | null;
+      if (el) { el.click(); return true; }
+      return false;
+    })
+    .catch(() => false);
+  if (!opened) { warn('未定位到「期望工作地」选择控件'); return; }
+  await delay(800 + Math.random() * 400);
+
+  // 逐级选省/市（弹窗 .eh_cascader_dialog 内的 li.cascader_panel_item）
+  for (const lv of levels) {
+    await pickDialogItem(page, lv);
+    await delay(500);
+  }
+  await confirmDialog(page);
 }
 
 /** el-select 下拉选择：点击输入框展开 → 在 .el-select-dropdown 点文本匹配项（性别/求职状态等） */
@@ -314,7 +313,7 @@ export async function applySearchFilters(page: Page, filters: SearchFilters): Pr
     }
   }
 
-  // 2) el-select 下拉（性别/求职状态）+ 输入框直填（期望工作地，页面可能禁用）
+  // 2) el-select 下拉（性别/求职状态）+ 期望工作地（touch：点容器弹级联选择器）
   if (filters.gender) {
     out(`设置筛选：性别 = ${filters.gender}`);
     await pickElSelect(page, '性别', filters.gender);
@@ -324,12 +323,12 @@ export async function applySearchFilters(page: Page, filters: SearchFilters): Pr
     await pickElSelect(page, '求职状态', filters.status);
   }
   if (filters.city) {
-    if (await isInputDisabled(page, '期望工作地')) {
-      warn('期望工作地输入框当前为禁用状态（可能需先在职位/订阅中配置），--city 已跳过');
-    } else {
-      out(`设置筛选：期望工作地 = ${filters.city}`);
-      await fillInputByPlaceholder(page, '期望工作地', filters.city);
-    }
+    // 实测（2026-08-28）：「期望工作地」输入框为只读/禁用（readonly disabled），
+    // **不能直填**——正确交互是点击容器（.talent_search_address）弹出级联弹窗选城市。
+    // 页面上带 `-区` 的就取市级；无则原样。支持「省,市」两级（如 广东省,湛江）。
+    out(`设置筛选：期望工作地 = ${filters.city}`);
+    const levels = filters.city.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+    await pickCityByCascader(page, levels);
   }
 
   // 3) dialog 式弹窗（期望行业/期望职能/从事行业/从事职能），多选+确定

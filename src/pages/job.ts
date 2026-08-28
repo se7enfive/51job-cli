@@ -126,10 +126,9 @@ export function jobsToRows(jobs: JobPost[]): Row[] {
 export type JobSource = 'auto' | 'delivery' | 'search';
 
 /**
- * 搜索页「期望工作地」输入框被站点置为只读禁用（2026-08-28 实测：input disabled/readonly，
- * 仅「去人才」带 jobid 自动预填时才启用，裸 goto 搜索页时不可填）。
- * 因此城市收敛走「居住地」级联弹窗（cascader：省 → 市），需市→省映射。
- * 覆盖常见城市；未收录城市直接跳过（不注入筛选，宁缺毋错）。
+ * 搜索页「期望工作地」实测（2026-08-28）：输入框 readonly/disabled 不能直填，
+ * 但**点击容器会弹出级联选择器**（.eh_cascader_dialog：省→市 两级，热门城市/省级列表）。
+ * 因此 city 注入需带省名（`广东省,湛江`），靠以下市→省映射补全；未收录城市跳过。
  */
 const CITY_TO_PROVINCE: Record<string, string> = {
   广州: '广东省', 深圳: '广东省', 珠海: '广东省', 汕头: '广东省', 佛山: '广东省',
@@ -147,8 +146,8 @@ const CITY_TO_PROVINCE: Record<string, string> = {
  * 把职位卡 detail（`城市 | 学历 | 年限 | 薪资`，如「湛江-霞山区 | 本科 | 3年及以上 | 7-12万/年」）
  * 转成人才搜索 SearchFilters，用于 `--source search` 自动注入。
  * 转换原则（grilling 决议）：**能稳定 1:1 转才转，若对不上直接跳过**。
- * - 城市：取市级（去 `-区` 后缀，`湛江-霞山区`→`湛江`），注入 **residence**（省,市 级联）
- *   ——因为搜索页「期望工作地」输入框被站点禁用（实测），城市收敛只能走居住地级联
+ * - 城市：取市级（去 `-区` 后缀，`湛江-霞山区`→`湛江`），经市→省映射补全为「省,市」注入 city
+ *   ——期望工作地控件是点击容器弹级联选择器（readonly 输入框不能直填，实测 2026-08-28）
  * - 学历：上取为页面枚举（`本科`→`本科及以上`，用户确认向上取扩大合适），注入 edu
  * - 年限：卡上 `3年及以上` 与页面枚举「3-5年/5-10年」槽不符 → 跳过
  * - 薪资：卡上按年 `7-12万/年`，页面按月档位 → 跳过
@@ -158,10 +157,10 @@ export function detailToSearchFilters(detail: string): SearchFilters {
   const segs = (detail || '').split('|').map((s) => s.trim()).filter(Boolean);
   if (segs.length === 0) return f;
 
-  // 城市：首段「市-区」（或纯市），去区级后缀取市级 → residence（省,市）
+  // 城市：首段「市-区」（或纯市），去区级后缀取市级 → 「省,市」
   const city = segs[0].split('-')[0]?.trim();
   if (city && CITY_TO_PROVINCE[city]) {
-    f.residence = `${CITY_TO_PROVINCE[city]},${city}`;
+    f.city = `${CITY_TO_PROVINCE[city]},${city}`;
   }
 
   // 学历：首段后的精确学历词 → 上取枚举；非已知词跳过
@@ -501,7 +500,7 @@ export async function readPositionCandidates(
       await delay(1500 + Math.random() * 800);
     }
     const filters = detailToSearchFilters(detail);
-    const injected = [filters.residence && `居住地=${filters.residence}`, filters.edu && `学历≥${filters.edu.replace('及以上', '')}`]
+    const injected = [filters.city && `期望工作地=${filters.city}`, filters.edu && `学历≥${filters.edu.replace('及以上', '')}`]
       .filter(Boolean)
       .join('、');
     out(`搜索结果关键词「${position}」${injected ? `（自动注入：${injected}）` : '（无可用筛选注入）'}`);
