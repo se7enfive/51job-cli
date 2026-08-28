@@ -20,7 +20,7 @@ import { navToRecommend, switchRecommendJob, readRecommendResults, greetRecommen
 import { hiOutcomeTag, HiOutcome } from './pages/hi-result';
 import { detailToSummary, openDetailByIndex, hiChatOnDetail } from './pages/candidate-detail';
 import { openTalentMgmtDetail, replyOnDetail, openCardDetail } from './pages/talent-insight';
-import { readPositions, jobsToRows, fetchJd, readPositionCandidates } from './pages/job';
+import { readPositions, jobsToRows, fetchJd, readPositionCandidates, type JobScope } from './pages/job';
 import { probePage, printProbe } from './pages/probe';
 import { ensureDirs, root as storeRoot } from './utils/store';
 import { collectExpiredFiles } from './utils/clean';
@@ -557,15 +557,23 @@ program
       '有投递则新 opens tab 该职位人才管理投递列表（投递来源），无投递则新跳该职位人才搜索（自动预填职位名+期望工作地并搜）。',
   )
   .option('--candidates <职位名>', '按职位拉取候选人列表（替代默认职位列表输出）')
+  .option('--scope <my|org>', '职位视图：my=我的职位，org=组织下职位（默认不切，保持页面当前视图）')
   .option('--json', 'JSON 输出')
   .action(async (opts) => {
     if (opts.json) setFormat('json');
+    // scope 校验：只允许 my / org
+    let scope: JobScope | undefined;
+    if (opts.scope !== undefined) {
+      const s = String(opts.scope).toLowerCase();
+      if (s !== 'my' && s !== 'org') fail(`--scope 只能为 my 或 org，收到: "${opts.scope}"`);
+      scope = s as JobScope;
+    }
     const throttle = createThrottle(parseThrottleEnv());
     await runCommand(async (page) => {
       if (opts.candidates) {
         const bid = await getBrowserRef();
         if (!bid) { fail('浏览器未就绪'); return; }
-        const r = await readPositionCandidates(bid, page, String(opts.candidates), { throttle });
+        const r = await readPositionCandidates(bid, page, String(opts.candidates), { throttle, scope });
         if (!r) { fail(`未能读取职位「${opts.candidates}」候选人`); return; }
         if (getFormat() === 'json') {
           printJson(r);
@@ -582,7 +590,7 @@ program
         }
         return;
       }
-      const jobs = await readPositions(page, { throttle });
+      const jobs = await readPositions(page, { throttle, scope });
       if (getFormat() === 'json') {
         printJson(jobs);
       } else {

@@ -42,12 +42,21 @@
 
 `src/pages/selectors.ts` job 组新增 `jobToTalent: '.job_to_talent_content'`；`src/pages/job.ts` 新增 `readPositionCandidates` + 可测纯函数 `parseMgmtRow`；`src/index.ts` `positions` 命令加 `--candidates <选型>` 并分派。
 
+### 视图范围（scope）补强（2026-08-28）
+
+实测发现职位管理页有两个 tab：**「我的职位」**（本账号发布，如三维扫描工程师）与**「组织下职位」**（组织全部，~10 个）。原 `positions` 只取「页面当前视图」——若页面残留停在某 tab，结果随页面漂移不可复现。
+
+补强：`positions --scope <my|org>` 主动点击对应 tab（`ensureJobScope` 按文本精确匹配叶子节点）后再收集，结果可复现；`readPositions` / `readPositionCandidates` 均透传 scope；未指定则保持当前视图（向后兼容）；非法 scope fail。
+
+真机验证：`--scope org` 稳定 10 个、`--scope my` 稳定 1 个；`--candidates "三维扫描工程师" --scope org` 在组织视图正确拉取（`source=delivery, count=9`，不再依赖残留）；`--scope foo` 报 `--scope 只能为 my 或 org`。
+
 ## 实施记录（2026-08-28）
 
 - 探测确认两种入口元素与落地 tab URL、人才管理页滚动容器 `.main_container`、行文本画像结构
 - 真机复测：`positions --candidates "三维扫描工程师" --json` → `source:'delivery'` + 9 位带画像；`--candidates "市政造价员" --json` → `source:'search'` + 30 位匹配
 - 城市解析锚定到经历时间戳前，杜绝「回复/继续聊」等操作词误报
 - 新增 `test/job.test.ts`（5 用例覆盖解析），66/66 测试全绿
+- scope 补强：真机验证 my/org 两种视图可复现（10 vs 1）+ `--candidates` 在 org 视图定位成功 + 非法 scope 拦截
 
 ## 验收
 

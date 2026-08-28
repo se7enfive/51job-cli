@@ -22,12 +22,39 @@ export interface JobPost {
 const JOB_MANAGE_URL = 'https://ehire.51job.com/Revision/job-manage';
 
 /**
- * 读取职位列表。
- * 不在职位管理页时自动导航（URL 直达），选择器按 2026-08-26 实测 DOM 校准：
- * 职位卡 .job_card / 名称 .job_name / 类型 .job-type-tag / 状态 .job_tag（多个拼接）/
- * 详情行 .job_bottom_info（地点|学历|经验|薪资）/ 待处理数 .job_card_num。
+ * 职位管理页视图：职位卡分「我的职位」与「组织下职位」两个 tab（.page_tab 内）。
+ * 默认进入停在「组织下职位」；页面常驻后 tab 残留会造成 positions 结果随页面漂移，
+ * 因此提供显式 scope（my/org）主动切 tab，保证结果可复现。
  */
-export async function readPositions(page: Page, opts: { throttle?: Throttle } = {}): Promise<JobPost[]> {
+export type JobScope = 'my' | 'org';
+const JOB_SCOPE_TAB: Record<JobScope, string> = { my: '我的职位', org: '组织下职位' };
+const JOB_SCOPE_TAB_SEL = '.row.page_tab div, .row.page_tab span, .row.page_tab li';
+
+/** 若 scope 提供，主动点击职位管理页对应 tab 并等待重渲染；否则保持当前。 */
+async function ensureJobScope(page: Page, scope?: JobScope): Promise<void> {
+  if (!scope) return;
+  const tabText = JOB_SCOPE_TAB[scope];
+  // 找 textContent 完全匹配、无子元素的「叶子」tab 元素并 click（避免命中「我的职位 组织下职位」容器行）
+  await page
+    .evaluate((text) => {
+      for (const el of Array.from(document.querySelectorAll('div, span, li'))) {
+        const t = (el.textContent || '').trim();
+        if (t === text && el.children.length === 0) {
+          (el as HTMLElement).click();
+          return true;
+        }
+      }
+      return false;
+    }, tabText)
+    .catch(() => {});
+  // 等 active 状态生效 + 卡片重渲染
+  await delay(1200 + Math.random() * 800);
+}
+
+/** 读取职位列表。
+ * @param scope  若提供，先切到「我的职位/组织下职位」再收集（结果可复现，不受页面残留影响）
+ */
+export async function readPositions(page: Page, opts: { throttle?: Throttle; scope?: JobScope } = {}): Promise<JobPost[]> {
   await assertNoRisk(page, { action: '读取职位列表', soft: true });
   if (opts.throttle) await opts.throttle.wait();
 
@@ -36,6 +63,8 @@ export async function readPositions(page: Page, opts: { throttle?: Throttle } = 
     await page.goto(JOB_MANAGE_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     await delay(2500 + Math.random() * 1000);
   }
+  // 若指定了 scope，主动切 tab（覆盖可能残留的视图，保证结果可复现）
+  await ensureJobScope(page, opts.scope);
 
   const s = selectors.job;
   // 等职位卡挂载（列表异步加载，最多 10s；无在招职位时返回空）
@@ -281,7 +310,7 @@ export async function readPositionCandidates(
   browser: Browser,
   page: Page,
   position: string,
-  opts: { throttle?: Throttle } = {},
+  opts: { throttle?: Throttle; scope?: JobScope } = {},
 ): Promise<PositionCandidates | null> {
   await assertNoRisk(page, { action: `读取职位「${position}」候选人`, soft: true });
   if (opts.throttle) await opts.throttle.wait();
@@ -292,6 +321,8 @@ export async function readPositionCandidates(
     await page.goto('https://ehire.51job.com/Revision/job-manage', { waitUntil: 'domcontentloaded', timeout: 60_000 });
     await delay(2500 + Math.random() * 1000);
   }
+  // 若指定 scope：先切到该职位视图再定位，避免残留 tab 导致定位不到
+  await ensureJobScope(page, opts.scope);
   const items = await page.$$(selectors.job.jobItem).catch(() => []);
   let target: import('puppeteer-core').ElementHandle<Element> | null = null;
   for (const item of items) {
