@@ -313,6 +313,51 @@ export async function openDetailByIndex(
 }
 
 /**
+ * 简历详情直链 URL（2026-08-28 实测）：
+ * `talent/resume/detail?resumeId=<id>` 只带 resumeId 即可打开任意候选人详情页
+ * （不依赖搜索列表/排序）。但**操作按钮区分上下文**：
+ * - 不带 jobId：仅可查看（电话沟通等），无「立即Hi聊/回复」（实测）
+ * - 带 jobId（recommendJobId/jobId 同值，fromModule=foundTalentSerachCommon）：
+ *   搜索池上下文，「立即Hi聊」可用（耗点数）
+ */
+export function resumeDetailUrl(resumeId: string, jobId?: string): string {
+  const base = `https://ehire.51job.com/Revision/talent/resume/detail?resumeId=${encodeURIComponent(resumeId)}`;
+  if (jobId) return `${base}&recommendJobId=${encodeURIComponent(jobId)}&jobId=${encodeURIComponent(jobId)}&fromModule=foundTalentSerachCommon`;
+  return base;
+}
+
+/**
+ * 按 resumeId 直链打开候选人详情页并提取（绕过搜索列表定位）。
+ * 适用场景：台账里已保存 resumeId 的候选人（搜索排序动态变化、虚拟滚动只留
+ * 首屏 30 人，按姓名可能定位不到）——直链是可靠路径。
+ * @param jobId 可选。提供则带搜索池上下文（详情页出现「立即Hi聊」，可配合 --hi）；
+ *              不提供则仅可查看（无操作按钮）。
+ */
+export async function openDetailByResumeId(
+  browser: Browser,
+  resumeId: string,
+  opts: { throttle?: Throttle; jobId?: string } = {}
+): Promise<{ page: Page; detail: CandidateDetail } | null> {
+  const detailPage = await browser.newPage().catch(() => null);
+  if (!detailPage) {
+    warn('打开详情 tab 失败');
+    return null;
+  }
+  const url = resumeDetailUrl(resumeId, opts.jobId);
+  try {
+    await detailPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  } catch {
+    warn(`详情直链加载失败（${url.slice(0, 90)}）`);
+    await detailPage.close().catch(() => {});
+    return null;
+  }
+  await delay(2500 + Math.random() * 1000);
+  if (opts.throttle) await opts.throttle.wait();
+  const detail = await readCandidateDetail(detailPage, { throttle: opts.throttle });
+  return { page: detailPage, detail };
+}
+
+/**
  * 在详情页点击「立即Hi聊」发起打招呼，并校验真实结果。
  * 返回 HiOutcome：success / quota_exhausted / failed / unknown（不再简单返回「点到了」）。
  */

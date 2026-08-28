@@ -139,6 +139,19 @@
 - 新增 `--all` 可选全量滚动收集（边慢滚边读，分钟级），但**⚠️ 滚动采集大量人才档案的行为易触发风控**，参数描述已注明「非必要不使用」，不主动测试。
 - **正确定位方式**：候选人的 `resumeId` 是**持久键**——看过的候选人落台账（`~/.51job-cli/ledger/`，0700，含 resumeId/画像/评估），后续任何查看/Hi 走**resumeId 直链**，不依赖搜索排序与虚拟滚动。
 
+### resumeId 直链固化为 CLI 命令能力（2026-08-28）
+
+**需求**（用户指出）：直链此前只存在于临时脚本，Agent 看 `--help` 不知道这条路——必须固化为命令能力并写进说明。
+
+**实现**：`src/pages/candidate-detail.ts` 新增 `resumeDetailUrl(resumeId, jobId?)`（纯函数，3 单测）+ `openDetailByResumeId(browser, resumeId, {jobId, throttle})`（直链打开 → `readCandidateDetail` 提取）。命令接入：
+- `inspect <姓名> | --resume-id <id> [--job-id <职位ID>] [--hi]`
+- `talent-detail <姓名> | --resume-id <id> [--job-id <职位ID>] [--hi]`
+- 直链参数语义（实测）：**只带 resumeId** 即能打开详情（纯查看，无操作按钮）；**带 jobId**（`recommendJobId`/`jobId` 同值 + `fromModule=foundTalentSerachCommon`）才出现「立即Hi聊」（搜索池上下文，耗点数）。`--hi` 未带 `--job-id` 时明确报错提示，不静默失败。
+
+**实测边界**：已 Hi 过的候选人详情页按钮文本变为「继续聊」（非「立即Hi聊」）——`--hi` 仅对未 Hi 候选人有效，编排时注意。
+
+**真机验证**：`inspect --resume-id 404581021 --json` → 莫先生详情（百威/红牛、求职意向）完整提取；`--job-id 162089910` 直链出现操作按钮。83/83 测试全绿。
+
 ### search 命令支持职位/城市参数注入（2026-08-28 grilling 决议，实施中）
 
 **需求**（用户）：`positions --source search` 会注入城市、职位下拉自动选中；单命令 `search` 也要能用参数控制——城市和职位不注入时搜索出的候选人基本不匹配。

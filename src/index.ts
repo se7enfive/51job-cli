@@ -18,7 +18,7 @@ import { openChat, sendMessage, chatAction, previewResume } from './pages/chat';
 import { searchTalents, readSearchResults, searchToRows, greetTalent, SearchFilters } from './pages/search';
 import { navToRecommend, switchRecommendJob, readRecommendResults, greetRecommend, recommendToRows } from './pages/recommend';
 import { hiOutcomeTag, HiOutcome } from './pages/hi-result';
-import { detailToSummary, openDetailByIndex, hiChatOnDetail } from './pages/candidate-detail';
+import { detailToSummary, openDetailByIndex, openDetailByResumeId, hiChatOnDetail } from './pages/candidate-detail';
 import { openTalentMgmtDetail, replyOnDetail, openCardDetail } from './pages/talent-insight';
 import { readPositions, jobsToRows, fetchJd, readPositionCandidates, resolvePositionCard, detailToSearchFilters, mergeSearchFilters, type JobScope, type JobSource } from './pages/job';
 import { probePage, printProbe } from './pages/probe';
@@ -475,16 +475,56 @@ greetCmd.action(async (name, opts) => {
 
 program
   .command('inspect')
-  .description('查看候选人详情（搜索池来源）：搜索/定位 → 开详情 tab → 提取结构化 JSON。\n只读操作不耗点数；--hi 提取后再调「立即Hi聊」（耗点数）。\n定位方式：姓名文本匹配或 --index 卡片序号。')
-  .argument('<姓名>', '候选人姓名（从搜索结果中定位）')
+  .description('查看候选人详情：搜索/定位 → 开详情 tab → 提取结构化 JSON。\n只读操作不耗点数；--hi 提取后再调「立即Hi聊」（耗点数）。\n定位方式三选一：姓名文本匹配 / --index 卡片序号 / **--resume-id 简历ID直链**\n（不经搜索、不受排序与虚拟列表影响，适合已落台账的候选人；要 Hi 需再带 --job-id）。')
+  .argument('[姓名]', '候选人姓名（从搜索结果中定位；用 --resume-id 时省略）')
   .option('--job <岗位>', '岗位关键字（兜底搜索用）')
   .option('--index <序号>', '搜索结果卡片序号（1-based，跳过姓名匹配）')
+  .option('--resume-id <简历ID>', '简历ID直链打开详情页（跳过搜索定位；唯一稳定键，推荐用于已落台账的候选人）')
+  .option('--job-id <职位ID>', '仅供 --resume-id：直链带搜索池上下文（详情页出现「立即Hi聊」按钮，--hi 才可用）')
   .option('--hi', '提取后调用「立即Hi聊」')
   .option('--json', 'JSON 输出')
   .action(async (name, opts) => {
     if (opts.json) setFormat('json');
     const throttle = createThrottle(parseThrottleEnv());
     await runCommand(async (page) => {
+      // —— resumeId 直链分支（跳过搜索定位）——
+      if (opts.resumeId) {
+        const bid = await getBrowserRef();
+        if (!bid) { fail('浏览器未就绪'); return; }
+        const rid = String(opts.resumeId).trim();
+        if (!/^\d+$/.test(rid)) fail(`--resume-id 需为数字简历ID，收到: "${rid}"`);
+        const jobId = opts.jobId !== undefined ? String(opts.jobId).trim() : undefined;
+        const opened = await openDetailByResumeId(bid, rid, { throttle, jobId });
+        if (!opened) { fail('详情直链打开失败'); return; }
+        trackExtraPage(opened.page);
+        const d = opened.detail;
+        if (!d.name) fail('详情提取结果缺少姓名(可能详情未渲染完整)，请重试或人工核对');
+
+        let hiResult: string | undefined;
+        let hiError: string | undefined;
+        if (opts.hi) {
+          if (!jobId) {
+            hiError = '直链未带 --job-id，详情页无「立即Hi聊」按钮，--hi 已跳过（可加 --job-id <职位ID> 重试）';
+          } else {
+            const outcome = await hiChatOnDetail(opened.page, { throttle });
+            hiResult = hiOutcomeTag(outcome);
+            if (outcome === 'quota_exhausted') {
+              hiError = 'Hi聊点数不足：本次未发出，请检查额度后再跑（已自动关闭弹窗，不重试）';
+            } else if (outcome !== 'success') {
+              hiError = `详情页打招呼未成功（${hiOutcomeTag(outcome)}）`;
+            }
+          }
+        }
+        if (getFormat() === 'json') {
+          printJson({ ...d, resumeId: rid, ...(hiResult ? { hiResult } : {}), ...(hiError ? { error: hiError } : {}) });
+        } else {
+          out(detailToSummary(d));
+          if (hiResult === 'success') out('详情页「立即Hi聊」已成功');
+        }
+        if (hiError) fail(hiError);
+        return;
+      }
+      if (!name) fail('需要 <姓名> 或 --resume-id <简历ID> 之一');
       // 确保搜索页有结果列表（无则用姓名或 --job 搜索一次）
       const current = page.url();
       // 人才搜索页判定：只有「人才搜索」页才不导航；「人才望远镜」推荐页（search-recommend）也会
@@ -558,15 +598,52 @@ program
 
 program
   .command('talent-detail')
-  .description('查看人才管理页候选人详情（投递/聊天双来源，非搜索池）：定位行 → 开详情 tab → 提取结构化 JSON。\n--hi 走「回复」动作（人才管理来源免费，不耗 Hi 点数；与搜索池的 Hi聊区分）。\n定位：姓名（默认包含匹配，--strict 精确匹配）。')
-  .argument('<姓名>', '候选人姓名（从人才管理页候选人行中定位）')
+  .description('查看候选人详情（投递/聊天双来源，非搜索池）：定位行 → 开详情 tab → 提取结构化 JSON。\n--hi 走「回复」动作（人才管理来源免费，不耗 Hi 点数；与搜索池的 Hi聊区分）。\n定位：姓名（默认包含匹配，--strict 精确匹配）或 **--resume-id 简历ID直链**（已落台账的候选人推荐）。')
+  .argument('[姓名]', '候选人姓名（从人才管理页候选人行中定位；用 --resume-id 时省略）')
   .option('--strict', '姓名精确匹配（默认包含匹配）')
+  .option('--resume-id <简历ID>', '简历ID直链打开详情页（跳过列表定位；--hi 需要 --job-id 才有「回复/立即Hi聊」按钮）')
+  .option('--job-id <职位ID>', '仅供 --resume-id：直链带搜索池上下文（出现操作按钮）')
   .option('--hi', '提取后调用「回复」（人才管理来源免费，不耗点数；与搜索池Hi聊区分）')
   .option('--json', 'JSON 输出')
   .action(async (name, opts) => {
     if (opts.json) setFormat('json');
     const throttle = createThrottle(parseThrottleEnv());
     await runCommand(async (page) => {
+      // —— resumeId 直链分支 ——
+      if (opts.resumeId) {
+        const bid = await getBrowserRef();
+        if (!bid) { fail('浏览器未就绪'); return; }
+        const rid = String(opts.resumeId).trim();
+        if (!/^\d+$/.test(rid)) fail(`--resume-id 需为数字简历ID，收到: "${rid}"`);
+        const jobId = opts.jobId !== undefined ? String(opts.jobId).trim() : undefined;
+        const opened = await openDetailByResumeId(bid, rid, { throttle, jobId });
+        if (!opened) { fail('详情直链打开失败'); return; }
+        trackExtraPage(opened.page);
+        const d = opened.detail;
+        if (!d.name) fail('详情提取结果缺少姓名（可能详情未渲染完整），请重试或人工核对');
+
+        let hiResult: string | undefined;
+        let hiError: string | undefined;
+        if (opts.hi) {
+          if (!jobId) {
+            hiError = '直链未带 --job-id，无操作按钮，--hi 已跳过（可加 --job-id <职位ID> 重试）';
+          } else {
+            const outcome = await replyOnDetail(opened.page, { throttle });
+            hiResult = outcome === 'success' ? 'reply_ok' : outcome;
+            if (outcome === 'failed') hiError = `详情页「回复」未确认成功（${outcome}），请人工检查`;
+          }
+        }
+        if (getFormat() === 'json') {
+          printJson({ ...d, resumeId: rid, ...(hiResult ? { hiResult, chanSource: 'delivery' } : {}), ...(hiError ? { error: hiError } : {}) });
+        } else {
+          out(detailToSummary(d));
+          if (hiResult === 'reply_ok') out('详情页「回复」已成功（免费，不耗点数）');
+          else if (hiResult === 'none') out('无「回复」按钮（可能已回复过），详情已提取');
+        }
+        if (hiError) fail(hiError);
+        return;
+      }
+      if (!name) fail('需要 <姓名> 或 --resume-id <简历ID> 之一');
       const bid = await getBrowserRef();
       if (!bid) { fail('浏览器未就绪'); return; }
       const opened = await openTalentMgmtDetail(bid, page, name, { strict: opts.strict, throttle });
