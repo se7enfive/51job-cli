@@ -37,7 +37,11 @@
 9. 51job recommend <岗位> --json → 人才望远镜推荐（姓名·点名）
 10. 51job inspect <姓名> --json  → 候选详情结构化（兼带检查 --hi 会在拿到后尝试一次并入返回包协议）
 11. 51job positions --json      → 职位列表目录和库
+12. 51job positions --candidates <职位名> --source search --json → 投递不足时人才池搜索扩充该职位候选（自动注入该职位城市/学历筛选；--json 返回 {position, source, count, candidates[]}）
+13. 51job talent-detail <姓名> --json → 投递/聊天来源候选人详情（--hi 走免费「回复」）；talent-detail 与 inspect 二选一，按候选人来源决定（人才管理页 vs 搜索池）
 ```
+
+> 📌 语义区分（勿混）：`list`=工作台投递箱全职位聚合流；`positions --candidates`=按职位的投递/搜索候选人；`search`=主动人才池搜索；`talent-detail`=投递/聊天来源详情；`inspect`=搜索池来源详情。搜索匹配的「匹配人才」≠「主动投递者」，Hi 前注意成本与意图。
 
 ## 环境变量指南
 

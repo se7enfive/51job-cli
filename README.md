@@ -46,31 +46,32 @@ cp .env.example ~/.51job-cli/.env
 ### 基础验证类
 | 命令 | 描述 |
 |---|---|
-| `login` | 打开并聚焦至 51job eHire 登录页面，并立刻返回（由外部人工验证或者 `wait-login` 接手检查登录扫码状态）。 |
-| `wait-login` | 轮询探测是否已获得业务域票据登入认证，超时会异常回抛。 |
-| `shutdown` | 关闭常驻浏览器实体进程（账号 Cookie 和会话资料仍保持留存在指定 Profile 目录中）。 |
-| `doctor` | 运行期环境自检输出（Chrome 探测、工作组存储地址等）。 |
-| `update` | 检查并提示更新版本的 Node npm 交互流程。 |
-| `probe` | 页面调试工具：开发期间输出结构化 DOM 选通器快照与抓取策略偏移（对普通抓取场景基本无用）。 |
+| `login` | 打开并聚焦至 51job eHire 登录页面并立刻返回（登录态由后续 `wait-login` 或首个业务命令检测）。 |
+| `wait-login [--timeout <秒>]` | 轮询探测登录态；成功退出 0、超时退出 1（默认 300s）。 |
+| `shutdown` | 关闭常驻浏览器进程（Cookie / 会话资料仍保留在本地 Profile 目录）。 |
+| `doctor` | 环境自检（Chrome 路径、Node 版本、数据目录、浏览器模式）。只读。 |
+| `update` | 打印升级指引（实际执行 `npm install -g 51job-cli@latest`）。 |
+| `probe` | 开发调试：DOM 选择器校准快照（普通场景无用）。 |
 
 ### 工具箱（查询寻源流）
 | 命令 | 描述 |
 |---|---|
-| `list` | 分页提取【招聘工作台】的「候选人收到简历列表」。 |
-| `search <关键词>` | 向【人才搜索池】查询。支持 `--exp`/`--age`/`--gender`/`--city`/`--edu` 等合计 13 维全景过滤。（支持 `--json` 输出结构阵列）。 |
-| `recommend [岗位]` | 拉取【人才望远镜推荐页】针对某个具体职数的被动系统判定人选（无需点耗扣除权限）。 |
-| `positions` / `jd <职位>`| 列举在招坑位目录库；`jd <X> --cat` 用以直链拉取 JD 内容描述纯文本用于对照提取。 |
+| `list [--unread]` | **工作台投递箱**全职位聚合候选人流（不分职位；每人 index/姓名/时间/画像/未读）。序号与 `chat --index` 一致。按职位筛选请用 `positions --candidates`。 |
+| `search <关键词>` | **人才搜索池**查询，支持十三维筛选（`--exp/--age/--gender/--city/--residence/--edu/--school/--status/--industry/--func/--salary/--work-industry/--work-func`），`--json` 输出结构化画像。 |
+| `recommend [岗位]` | **人才望远镜**推荐池（按岗位的系统推荐，不耗点数）。`--greet`/`--inspect` 可直接打招呼/查详情。 |
+| `positions [--candidates <职位名>]` | **职位管理页**在招职位目录；`--candidates` 拉取该职位候选人，`--source <auto\|delivery\|search>` 控制来源（auto=按有无投递分派 / delivery=仅投递 / search=人才池搜索扩充），`--scope <my\|org>` 切视图。 |
+| `jd <名称> [--cat]` | 抓取职位 JD 长文缓存到 `~/.51job-cli/jd/`，`--cat` 直出正文。 |
 
 ### 执行管线（原子级会话动作）
 | 命令 | 描述 |
 |---|---|
-| `inspect <姓名>` | `检视简历`。在不强制发生交互通讯的前提下拉取解析对应人选的全部详情摘要字段以及求职偏位。可跨参数支持组合操作（`--hi` 等同看后再打招呼）。 |
-| `talent-detail <姓名>` | 由双源进入检视（投递列表直达或私信），不使用搜索引擎找库方案的定位工具。若含 `--hi` 是免费扣点回复。 |
-| `preview <姓名>` | 在线预览功能页面截取候选人页面底片，如设置开启 `51JOB_RESUME_OCR=1` 同意，则自动使用百度接口提取归档文字。 |
-| `greet [姓名]` | `初筛Hi聊`。完整一站式：按前向搜索过滤找到 → 进入明细打摘要 → （可选交互拒绝提示）等候审批 → 请求建立沟通联系。 |
-| `chat <姓名>` | 打开目标会话记录聊天框。 |
-| `send --text <文案>` | 要求已有展开中的 `chat` 会话焦点。推发特定聊天明文记录。 |
-| `action <标签名>` | 要求已有展开中的 `chat` 会话焦点。快速索要附件、标识操作候选标签（`unsuitable`/`wechat`/`interview`...）。 |
+| `inspect <姓名> [--job <岗位>] [--index <序号>] [--hi]` | **搜索池**候选人简历详情（只读不耗点数）；`--hi` 提取后调「立即Hi聊」（耗点数）。 |
+| `talent-detail <姓名> [--strict] [--hi]` | **投递/聊天来源**候选人详情（非搜索池，定位方式为人才管理行）；`--hi` 走免费「回复」动作。 |
+| `preview <姓名>` | 在线简历截图存档到 `~/.51job-cli/ocr/`（每日次数有限；`51JOB_RESUME_OCR=1` 才上传云端 OCR，opt-in）。 |
+| `greet [姓名] [--job <岗位>] [--by-index <序号>] [--dry-run] [--no-confirm]` | **Hi聊**一站式：搜索筛选 → 定位 → 详情摘要 → 人机确认 → 发出。写操作耗点数；`--dry-run` 只看不发。成功 0 / 点数不足或失败 1。 |
+| `chat [姓名] [--index <序号>] [--unread] [--strict]` | 打开候选人的聊天会话（会话窗口，供后续 send/action 用）。不发送消息。 |
+| `send --text <文案>` | 向【已打开的 chat 会话】发送一条文本（防重防抖，一次一遍）。 |
+| `action <操作> [--no-confirm]` | 会话业务动作：`resume`(索要简历)/`unsuitable`(不合适)/`note`(备注)/`wechat`(换微信)/`phone`(换电话)/`interview`(约面试)。写操作默认人机确认。 |
 
 ---
 

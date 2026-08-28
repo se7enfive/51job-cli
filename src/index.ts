@@ -81,7 +81,7 @@ function filtersFromOpts(opts: Record<string, string | undefined>): SearchFilter
 
 program
   .name('51job')
-  .description('前程无忧自动化 CLI：候选人管理、Hi聊、人才搜索、职位管理。基于 puppeteer-core/CDP 驱动本机 Chrome，自带反检测与风控熔断。')
+  .description('前程无忧(51job)企业招聘端自动化 CLI：候选人管理、Hi聊、人才搜索、职位管理。\n供 AI Agent / 脚本编排：每个子命令独立可组合，退出码 0=成功 1=业务失败 2=可用性禁用；\n--json 单文档结构化输出；驱动本机 Chrome，登录态持久化，自带反检测与风控熔断。')
   .version(version);
 
 /**
@@ -107,7 +107,7 @@ async function runCommand(callback: (page: import('puppeteer-core').Page) => Pro
 
 program
   .command('login')
-  .description('打开 ehire 登录页后立即返回（不等待登录；由 wait-login 轮询等待）')
+  .description('打开 51job eHire 登录页（有头模式）后立即同步返回，不等待登录结果。\n登录完成与否由后续 wait-login 或首个业务命令自行检测。\n用法：先生成浏览器登录态，再进行其它操作。')
   .action(async () => {
     // 登录分离模式（对齐 boss-cli login 语义）：只开页、立即断开返回，
     // 不 sleep / 不 poll / 不校验登录结果——成功与否由后续命令自行体现。
@@ -128,7 +128,7 @@ program
 
 program
   .command('wait-login')
-  .description('等待登录完成（轮询检测，配合 login 使用）')
+  .description('轮询等待登录完成（配合 login。超时非零退出，用于区分成功了/没成功：\n0=已登录 1=超时。默认 300s。')
   .option('--timeout <秒>', '等待登录超时秒数', '300')
   .action(async (opts) => {
     // 参数校验（T104）：非法值（abc → NaN、0、负数）会让轮询循环立即超时假结束，
@@ -148,12 +148,7 @@ program
 
 program
   .command('list')
-  .description(
-    '读取工作台【投递箱】候选人列表（全部职位聚合流，不区分职位；' +
-      '返回每个候选人的 index/姓名/投递时间/画像/是否未读）。' +
-      '如需按职位筛投递候选人请用 positions（待处理人才入口），不是本命令。' +
-      '序号与 chat --index 一致。',
-  )
+  .description('读取工作台【投递箱】候选人列表（全部职位聚合流，不区分职位）。\n返回每人 index/姓名/投递时间/画像/是否未读；序号与 chat --index 一一对应。\n按职位筛选投递候选人请用 positions --candidates（不是本命令）。\n--json 输出结构数组 [{index,name,time,profile,unread}]。')
   .option('--unread', '仅未读')
   .option('--json', 'JSON 输出')
   .action(async (opts) => {
@@ -172,7 +167,7 @@ program
 
 program
   .command('chat')
-  .description('打开指定候选人会话')
+  .description('打开指定候选人的聊天会话（定位方式：姓名或 --index，序号与 list 输出 # 列一致）。\n供后续 send / action 命令使用。不发送任何消息。')
   .argument('[姓名]', '候选人姓名（优先用 --index 精确定位）')
   .option('--index <序号>', '列表序号（与 list 输出的 # 列一致）')
   .option('--unread', '使用未读列表序号（与 list --unread 输出一致）')
@@ -202,7 +197,7 @@ program
 
 program
   .command('send')
-  .description('向当前会话发送消息')
+  .description('向【当前已打开】的聊天会话发送一条文本消息（须先运行 chat 打开目标会话）。\n含防重防抖：一次只发送一遍，不自动重试。发送人即当前登录账号。')
   .option('--text <内容>', '消息内容')
   .action(async (opts) => {
     if (!opts.text) fail('请用 --text 提供消息内容');
@@ -215,7 +210,7 @@ program
 
 program
   .command('action')
-  .description('会话操作: resume(索要简历) / unsuitable(不合适) / note(备注) / wechat(换微信) / phone(换电话) / interview(约面试)')
+  .description('对【当前已打开】的聊天会话执行业务动作（须先运行 chat）。\n可操作为：resume(索要简历) / unsuitable(标记不合适) / note(备注) / wechat(换微信) / phone(换电话) / interview(约面试)。\n写操作默认需人机确认；--no-confirm 跳过（谨慎）。')
   .argument('<操作>')
   .option('--no-confirm', '跳过不可逆动作确认（谨慎）')
   .action(async (action, opts) => {
@@ -228,7 +223,7 @@ program
 
 const searchCmd = program
   .command('search')
-  .description('人才搜索：关键词 + 多维筛选（自动导航搜索页，设置筛选后搜索并读结果）')
+  .description('人才搜索：关键词 + 多维筛选（自动导航到人才搜索页，设置筛选后搜索并读结果列表）。\n支持十三维筛选参数（--exp/--age/--gender/--city/--residence/--edu/--school/--status/--industry/--func/--salary/--work-industry/--work-func）。\n返回候选人画像列表（期望职位/公司/年龄/经验/学历/薪资等）。\ngreet / inspect 也复用本搜索池。')
   .argument('<关键词>')
   .option('--json', 'JSON 输出');
 addSearchFilterOptions(searchCmd);
@@ -250,7 +245,7 @@ searchCmd.action(async (keyword, opts) => {
 
 program
   .command('recommend')
-  .description('读取人才望远镜推荐候选人列表（可切岗位、打招呼、开详情）')
+  .description('读取人才望远镜推荐候选人列表（按岗位聚合的系统推荐池，不耗 Hi 点数）。\n可选 --greet 直接对推荐候选人打招呼、--inspect 打开简历详情提取；\n不耗时默认输出列表。')
   .argument('[岗位]', '推荐岗位关键字（可选，匹配左侧岗位菜单）')
   .option('--greet <姓名或序号>', '对推荐列表中的候选人打招呼（姓名或序号）')
   .option('--inspect <姓名或序号>', '打开推荐候选人的简历详情页并提取结构化 JSON（先看再 Hi）')
@@ -354,7 +349,7 @@ program
 
 const greetCmd = program
   .command('greet')
-  .description('对候选人打招呼：搜索筛选 → 定位 → 打开详情 → 摘要 → 人机确认 → Hi')
+  .description('对候选人打招呼（Hi聊）：搜索筛选 → 定位 → 打开详情 → 摘要 → 人机确认 → 发出 Hi。\nHi 是写操作且消耗点数：默认需确认（--no-confirm 跳过）。\n--dry-run 只看详情摘要不发出。\n退出码：success/dry_run/cancelled→0；quota_exhausted(点数不足)/failed→1，编排层据此停手。')
   .argument('[姓名]', '候选人姓名（可省略，用 --by-index 定位）')
   .option('--job <岗位>', '岗位关键字（搜索关键词）')
   .option('--by-index <序号>', '搜索结果卡片序号（1-based，跳过姓名匹配）')
@@ -412,7 +407,7 @@ greetCmd.action(async (name, opts) => {
 
 program
   .command('inspect')
-  .description('查看候选人详情：搜索/定位 → 开详情 tab → 提取结构化 JSON（先看再 Hi）')
+  .description('查看候选人详情（搜索池来源）：搜索/定位 → 开详情 tab → 提取结构化 JSON。\n只读操作不耗点数；--hi 提取后再调「立即Hi聊」（耗点数）。\n定位方式：姓名文本匹配或 --index 卡片序号。')
   .argument('<姓名>', '候选人姓名（从搜索结果中定位）')
   .option('--job <岗位>', '岗位关键字（兜底搜索用）')
   .option('--index <序号>', '搜索结果卡片序号（1-based，跳过姓名匹配）')
@@ -495,7 +490,7 @@ program
 
 program
   .command('talent-detail')
-  .description('查看人才管理页候选人详情（覆盖投递/聊天双来源，非搜索池）：定位行 → 开详情 tab → 提取结构化 JSON。--hi 走「回复」免费动作（非Hi聊点数）')
+  .description('查看人才管理页候选人详情（投递/聊天双来源，非搜索池）：定位行 → 开详情 tab → 提取结构化 JSON。\n--hi 走「回复」动作（人才管理来源免费，不耗 Hi 点数；与搜索池的 Hi聊区分）。\n定位：姓名（默认包含匹配，--strict 精确匹配）。')
   .argument('<姓名>', '候选人姓名（从人才管理页候选人行中定位）')
   .option('--strict', '姓名精确匹配（默认包含匹配）')
   .option('--hi', '提取后调用「回复」（人才管理来源免费，不耗点数；与搜索池Hi聊区分）')
@@ -540,7 +535,7 @@ program
 
 program
   .command('preview')
-  .description('在线简历预览（每日次数有限）')
+  .description('在线简历预览（每日次数有限）：打开预览截图/OCR 存档到本地。\n默认只存本地图片；设置 51JOB_RESUME_OCR=1 才上传云端 OCR（opt-in）。')
   .argument('<姓名>')
   .action(async (name) => {
     const throttle = createThrottle(parseThrottleEnv());
@@ -553,13 +548,15 @@ program
 program
   .command('positions')
   .description(
-    '读取职位列表。加 --candidates <职位名> 拉取某职位的候选人：' +
-      '有投递则新 opens tab 该职位人才管理投递列表（投递来源），无投递则新跳该职位人才搜索（自动预填职位名+期望工作地并搜）。' +
-      '加 --source search 强制走人才池搜索（投递少时扩充候选）。',
+    '读取职位列表（职位管理页）。加 --candidates <职位名> 拉取该职位候选人：\n' +
+      '来源由 --source 决定：auto(默认)=有投递走投递列表、无投递走人才搜索；delivery=仅投递；\n' +
+      'search=强制人才池搜索（投递少时扩充候选，自动注入该职位的城市/学历筛选）。\n' +
+      '投递候选人 output: {position, source: delivery|search, portal, count, candidates[]}；\n' +
+      'candidates 含每人 index/name/age/years/edu/city/snippet。',
   )
   .option('--candidates <职位名>', '按职位拉取候选人列表（替代默认职位列表输出）')
   .option('--scope <my|org>', '职位视图：my=我的职位，org=组织下职位（默认不切，保持页面当前视图）')
-  .option('--source <auto|delivery|search>', '候选人来源: auto=按有无投递分派(默认) | delivery=仅投递 | search=人才池搜索')
+  .option('--source <auto|delivery|search>', '候选人来源: auto=按有无投递分派(默认) / delivery=仅投递 / search=人才池搜索')
   .option('--json', 'JSON 输出')
   .action(async (opts) => {
     if (opts.json) setFormat('json');
@@ -611,7 +608,7 @@ program
 
 program
   .command('jd')
-  .description('抓取职位 JD 缓存到本地 (~/.51job-cli/jd/)')
+  .description('抓取职位 JD 长文本缓存到本地 (~/.51job-cli/jd/<名称>.md)，供后续比对使用。\n--cat 直接输出正文；--json 返回 {file, name, content}。')
   .argument('<名称>')
   .option('--cat', '抓取后直接输出 JD 正文')
   .option('--json', 'JSON 输出（含文件路径）')
@@ -633,7 +630,7 @@ program
 
 program
   .command('probe')
-  .description('探查当前页面结构，输出选择器校准建议（保存到 ~/.51job-cli/probe/）')
+  .description('调试工具：探查当前页面结构，输出选择器校准建议（保存到 ~/.51job-cli/probe/）。\n仅供开发校准，普通使用无需运行。')
   .option('--json', 'JSON 输出')
   .action(async (opts) => {
     if (opts.json) setFormat('json');
@@ -649,7 +646,7 @@ program
 
 program
   .command('shutdown')
-  .description('关闭常驻浏览器实例（登录态保留，下次命令自动重启）')
+  .description('关闭常驻浏览器实例（登录态保留在 ~/.51job-cli/.cache/，下次命令自动重启）。\n本机浏览器资源紧张时使用。')
   .action(async () => {
     await shutdownBrowser();
     out('常驻浏览器已关闭（登录态保留在 ~/.51job-cli/.cache/）');
@@ -657,7 +654,7 @@ program
 
 program
   .command('clean')
-  .description('清理本地生成物（ocr 简历截图/识别文本、probe 页面快照），不触碰登录态与 state.json')
+  .description('清理本地生成物（ocr 简历截图/识别文本、probe 页面快照、jd 职位缓存），不触碰登录态与 state.json。\n只清超保留期(默认 30 天，51JOB_RETENTION_DAYS 可配)的文件；--all 清全部。\n先 --dry-run 查看将删除的文件，再实际清理。')
   .option('--dry-run', '只列出将删除的文件，不实际删除')
   .option('--jd', '连同 jd/ 职位 JD 缓存一起清理')
   .option('--all', '忽略保留期，清理全部')
@@ -689,7 +686,7 @@ program
 
 program
   .command('doctor')
-  .description('环境自检：Chrome 路径、Node 版本、数据目录')
+  .description('环境自检：Chrome 路径、Node 版本、数据目录、反检测与浏览器模式配置。\n启动前排障用，只读不修改任何内容。')
   .action(() => {
     ensureDirs();
     out(`Node: ${process.version}`);
@@ -702,7 +699,7 @@ program
 
 program
   .command('update')
-  .description('通过 npm 更新 51job-cli')
+  .description('升级 51job-cli 到最新版（提示命令，实际执行 npm install -g 51job-cli@latest）')
   .action(async () => {
     warn('更新请执行: npm install -g 51job-cli@latest');
   });
