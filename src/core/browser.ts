@@ -194,10 +194,11 @@ export async function ensureBrowser(): Promise<Browser> {
     args.push('--start-maximized');
   }
 
-  const child = spawn(chromePath, args, { stdio: 'ignore', detached: false });
-  // T305 修复派生问题：浏览器是「常驻复用」设计（命令结束只断开连接不关进程），
-  // 若让 child 持有本进程事件循环，命令完成后 CLI 进程会一直挂着不退出。
-  // unref 后 CLI 可自然结束，Chrome 继续常驻供下条命令复用。
+  // T307 归属问题，此处一并修正：浏览器是「常驻复用」设计（命令结束只断开连接不关进程）。
+  // detached: true 让 Chrome 脱离当前进程组成为独立会话——命令结束后 CLI 进程退出不会连带
+  // 把 Chrome 一并回收；否则 login 这类「人机分离」场景窗口会随命令返回瞬间关闭，
+  // 用户来不及扫码。child.unref() 让 Chrome 不再持有本进程事件循环，CLI 命令可自然结束。
+  const child = spawn(chromePath, args, { stdio: 'ignore', detached: true });
   child.unref();
   const pid = child.pid;
 
