@@ -23,7 +23,7 @@
    git push origin main --tags
    ```
 
-* 此时，基于 `tag-publish.yml`，系统流水线将在识别 `v*` 标准标签被推送后，自动发起完整的 build-test 任务校验。在一切全绿无误的前提下自动构建 `gh release create` 会话附带自动生成的提交差异。
+* 此时，基于 `tag-publish.yml`，系统流水线将在识别 `v*` 标准标签被推送后，自动发起完整的 build-test 任务校验。在一切全绿无误的前提下自动构建 `gh release create` 会话附带自动生成的提交差异。若 `package.json` 版本已与目标一致，会跳过 `npm version`（避免 `Version not changed` 中断 publish）。
 * **关于 npm 发布（可选环节）**：默认跳过 npm 发布，GitHub Release 与 npm 完全解耦——未配置 `NPM_TOKEN` 时流水线自动跳过 npm 相关步骤（typecheck/test/build 与 Release 创建照常执行），不会红叉。若后续需要发布到 npm 官方源，在仓库 Secrets 添加 `NPM_TOKEN`（Automation 类型 token）后重推 tag 即可。
 
 ### 方式二：跳过发布标记的控制台直接推送 (Workflow Dispatch Override)

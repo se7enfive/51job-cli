@@ -95,10 +95,16 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          set -euo pipefail
           # --ignore-scripts：typecheck/test/build 已在上方步骤显式执行过，
           # 跳过 prepublishOnly 避免重复跑（本地 npm publish 仍会走 prepublishOnly 门禁）
           target="${{ steps.version.outputs.target }}"
-          npm version --no-git-tag-version "$target"
+          current="$(node -p "require('./package.json').version")"
+          if [ "$current" != "$target" ]; then
+            npm version --no-git-tag-version "$target"
+          else
+            echo "package.json already at $target; skip npm version"
+          fi
           npm publish --access public --ignore-scripts
 
       - name: Create GitHub Release (tag push only)
