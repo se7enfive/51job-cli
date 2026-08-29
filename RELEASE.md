@@ -23,7 +23,8 @@
    git push origin main --tags
    ```
 
-* 此时，基于 `tag-publish.yml`，系统流水线将在识别 `v*` 标准标签被推送后，自动发起完整的 build-test 任务校验。在一切全绿无误的前提下流转 npm token 打包到官方源并构建 `gh release create` 会话附带自动生成的提交差异。
+* 此时，基于 `tag-publish.yml`，系统流水线将在识别 `v*` 标准标签被推送后，自动发起完整的 build-test 任务校验。在一切全绿无误的前提下自动构建 `gh release create` 会话附带自动生成的提交差异。
+* **关于 npm 发布（可选环节）**：默认跳过 npm 发布，GitHub Release 与 npm 完全解耦——未配置 `NPM_TOKEN` 时流水线自动跳过 npm 相关步骤（typecheck/test/build 与 Release 创建照常执行），不会红叉。若后续需要发布到 npm 官方源，在仓库 Secrets 添加 `NPM_TOKEN`（Automation 类型 token）后重推 tag 即可。
 
 ### 方式二：跳过发布标记的控制台直接推送 (Workflow Dispatch Override)
 
@@ -38,5 +39,5 @@
 ## Q/A 环境阻断验证排查情况
 
 * 若遇到了发版错误直接卡挂变红：
-  1. 多重检查 npm 包在官方库是否由于权限挂退导致无法推送建立；检查 GitHub Settings 中配没配 `NPM_TOKEN` 及 `GITHUB_TOKEN` 的赋权权限。
+  1. 若 npm 发布步骤报权限/401 类错误：检查 GitHub Settings 中是否已配置 `NPM_TOKEN`（无 `NPM_TOKEN` 时 npm 步骤会整体跳过，属于预期行为，不影响 GitHub Release 生成）。
   2. 此环境工作流已剥开 `id-token` 等级缩小爆破面积，并排除了同时触发 `tags` 以及创建完 GitHub Session 所产生的冗余重发流（即所谓的第二次 publish）。如有遇到可再排查是否其他环境因素联动。
