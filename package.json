@@ -1,6 +1,6 @@
 {
   "name": "51job-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "前程无忧自动化 CLI：候选人列表、Hi聊发消息、获取简历、人才搜索、职位管理。基于 puppeteer-core/CDP 驱动本机 Chrome，适合 AI Agent 招聘自动化",
   "license": "GPL-3.0",
   "bin": {
