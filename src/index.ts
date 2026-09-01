@@ -475,13 +475,13 @@ greetCmd.action(async (name, opts) => {
 
 program
   .command('inspect')
-  .description('查看候选人详情：搜索/定位 → 开详情 tab → 提取结构化 JSON。\n只读操作不耗点数；--hi 提取后再调「立即Hi聊」（耗点数）。\n定位方式三选一：姓名文本匹配 / --index 卡片序号 / **--resume-id 简历ID直链**\n（不经搜索、不受排序与虚拟列表影响，适合已落台账的候选人；要 Hi 需再带 --job-id）。')
+  .description('【搜索池专用】查看主动搜索到的人才：搜索/定位 → 开简历详情 tab → 提取结构化 JSON。\n不要用本命令查看已投递/已聊天候选人；那类候选人请用 talent-detail。\n只读不耗点数；--hi 会执行搜索池「立即Hi聊」并消耗点数（不是普通文字回复）。\n定位三选一：姓名 / --index 搜索结果序号 / --resume-id 简历ID直链；--resume-id --hi 必须同时提供 --job-id。')
   .argument('[姓名]', '候选人姓名（从搜索结果中定位；用 --resume-id 时省略）')
-  .option('--job <岗位>', '岗位关键字（兜底搜索用）')
-  .option('--index <序号>', '搜索结果卡片序号（1-based，跳过姓名匹配）')
-  .option('--resume-id <简历ID>', '简历ID直链打开详情页（跳过搜索定位；唯一稳定键，推荐用于已落台账的候选人）')
-  .option('--job-id <职位ID>', '仅供 --resume-id：直链带搜索池上下文（详情页出现「立即Hi聊」按钮，--hi 才可用）')
-  .option('--hi', '提取后调用「立即Hi聊」')
+  .option('--job <岗位>', '兜底搜索关键词；仅姓名定位且当前没有搜索结果时使用')
+  .option('--index <序号>', '搜索池结果卡片序号（1-based；与 list/chat 序号无关）')
+  .option('--resume-id <简历ID>', '搜索池详情直链；跳过搜索和排序，推荐使用已记录的稳定简历ID')
+  .option('--job-id <职位ID>', '配合 --resume-id --hi 使用；提供搜索池职位上下文后才有「立即Hi聊」按钮')
+  .option('--hi', '查看详情后执行搜索池「立即Hi聊」（消耗点数；不是普通回复；必须确认结果）')
   .option('--json', 'JSON 输出')
   .action(async (name, opts) => {
     if (opts.json) setFormat('json');
@@ -598,12 +598,12 @@ program
 
 program
   .command('talent-detail')
-  .description('查看候选人详情（投递/聊天双来源，非搜索池）：定位行 → 开详情 tab → 提取结构化 JSON。\n--hi 走「回复」动作（人才管理来源免费，不耗 Hi 点数；与搜索池的 Hi聊区分）。\n定位：姓名（默认包含匹配，--strict 精确匹配）或 **--resume-id 简历ID直链**（已落台账的候选人推荐）。')
-  .argument('[姓名]', '候选人姓名（从人才管理页候选人行中定位；用 --resume-id 时省略）')
-  .option('--strict', '姓名精确匹配（默认包含匹配）')
-  .option('--resume-id <简历ID>', '简历ID直链打开详情页（跳过列表定位；--hi 需要 --job-id 才有「回复/立即Hi聊」按钮）')
-  .option('--job-id <职位ID>', '仅供 --resume-id：直链带搜索池上下文（出现操作按钮）')
-  .option('--hi', '提取后调用「回复」（人才管理来源免费，不耗点数；与搜索池Hi聊区分）')
+  .description('【投递/聊天来源专用】查看已经投递、已经聊天或已在人才管理列表中的候选人：人才管理行 → 开简历详情 tab → 提取结构化 JSON。\n不要用本命令查看主动搜索池候选人；搜索池候选人请用 inspect。\n默认只读不耗点数；--hi 点击「回复」打开沟通面板，不发送普通文字，人才管理来源免费。\n定位：姓名（默认包含匹配，建议同名时加 --strict）或 --resume-id 稳定简历ID直链；--resume-id --hi 需要同时提供 --job-id。')
+  .argument('[姓名]', '投递/聊天/人才管理来源候选人姓名；主动搜索池候选人不要用此参数定位')
+  .option('--strict', '姓名精确匹配；不加时为包含匹配，可能命中同名/相似姓名')
+  .option('--resume-id <简历ID>', '投递/聊天来源详情直链；跳过人才管理列表定位，推荐使用已记录的稳定简历ID')
+  .option('--job-id <职位ID>', '配合 --resume-id --hi 使用；提供职位上下文后详情页才显示「回复」操作')
+  .option('--hi', '查看详情后点击「回复」打开聊天输入框（免费；不发送普通文字；不是搜索池「立即Hi聊」）')
   .option('--json', 'JSON 输出')
   .action(async (name, opts) => {
     if (opts.json) setFormat('json');

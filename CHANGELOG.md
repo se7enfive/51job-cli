@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-09-01
+
+### Changed
+- 强化 CLI、README、AGENTS 与能力文档中的候选人来源路由说明：明确 `talent-detail`（投递/聊天来源）与 `inspect`（搜索池来源）的适用边界。
+- 明确区分 `talent-detail --hi` 的免费「回复」与 `inspect --hi` 的消耗点数「立即Hi聊」；说明两者均不发送普通文字。
+- 补充 `chat` 序号、`search`/`inspect` 来源和 AI/脚本调用示例，降低误用风险。
+
 ## [0.1.1] - 2026-08-29
 
 ### Added

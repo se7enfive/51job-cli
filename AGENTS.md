@@ -29,28 +29,28 @@
 1. 51job login                  → 首次使用：用户扫码登录（一次性，立即返回不强制长阻塞）
 2. 51job wait-login             → 探测判断登录操作闭环，登入就绪
 3. 51job list --unread --json   → 获取未读候选人（解析 JSON）
-4. 51job chat <姓名> --index N   → 打开会话（同名用序号，确保传 index 跟抓出来的 list index 索引匹配一致使用，支持 --unread 按相同条件透滤）
-5. 51job action resume          → 索要简历
-6. 51job send --text "明细文本"
-7. 51job search <关键词> --json → 人才搜索（13 维筛选取值见 skills 下字典库关联通道）
-8. 51job greet <姓名> --job <岗> → 对候选人打招呼（补搜池后再确认，带上 --no-confirm 允许 AI 做最后裁决）
-9. 51job recommend <岗位> --json → 人才望远镜推荐（姓名·点名）
-10. 51job inspect <姓名> --json  → 候选详情结构化（兼带检查 --hi 会在拿到后尝试一次并入返回包协议）
-11. 51job positions --json      → 职位列表目录和库
-12. 51job positions --candidates <职位名> --source search --json → 投递不足时人才池搜索扩充该职位候选（自动注入该职位城市/学历筛选；--json 返回 {position, source, count, candidates[]}）
-13. 51job talent-detail <姓名> --json → 投递/聊天来源候选人详情（--hi 走免费「回复」）；talent-detail 与 inspect 二选一，按候选人来源决定（人才管理页 vs 搜索池）
+4. 51job chat <姓名> --index N   → 打开已投递/已聊天候选人的会话（同名用序号，确保 index 与 `list` 输出一致；支持 --unread）
+5. 51job action resume          → 对当前会话索要简历
+6. 51job send --text "明细文本" → 向当前已打开会话发送普通文字；不要因超时盲目重发
+7. 51job search <关键词> --json → 搜索主动人才池（13 维筛选取值见 skills 下字典库关联通道）
+8. 51job inspect <姓名> --json  → **仅查看主动搜索池候选人**；`--hi` 是消耗点数的「立即Hi聊」
+9. 51job greet <姓名> --job <岗> → **仅对搜索池候选人**执行「立即Hi聊」（先看再确认；`--no-confirm` 才跳过确认）
+10. 51job recommend <岗位> --json → 人才望远镜推荐池（姓名·点名）
+11. 51job positions --json      → 职位列表目录
+12. 51job positions --candidates <职位名> --source search --json → 投递不足时用人才池搜索扩充候选（自动注入城市/学历）
+13. 51job talent-detail <姓名> --json → **仅查看已投递/已聊天/人才管理列表候选人**；`--hi` 是免费「回复」，只打开沟通面板，不发送普通文字。talent-detail 与 inspect 必须按候选人来源二选一。
 ```
 
-> 📌 语义区分（勿混）：`list`=工作台投递箱全职位聚合流；`positions --candidates`=按职位的投递/搜索候选人；`search`=主动人才池搜索；`talent-detail`=投递/聊天来源详情；`inspect`=搜索池来源详情。搜索匹配的「匹配人才」≠「主动投递者」，Hi 前注意成本与意图。
+> 📌 **候选人来源路由（AI 必须遵守）**：`list`=工作台投递箱；`positions --candidates`=按职位的投递/搜索候选人；`search`=主动人才搜索池；`talent-detail`=已投递/已聊天/人才管理来源；`inspect`=主动搜索池来源；`recommend`=人才望远镜推荐池。已投递/已聊天候选人不要用 `inspect`/`greet`；搜索池候选人不要用 `talent-detail`。搜索匹配人才 ≠ 主动投递者。
 
 ## resumeId 直链（推荐找回路径）
 
 搜索排序动态、列表是虚拟滚动（DOM 只留首屏 ~30 卡）——**按姓名/序号定位可能失效**。resumeId 是候选人**持久键**，直链不受影响：
 
 - `inspect --resume-id <简历ID> --json` —— 直链打开详情（纯查看免费；不用搜索/不依赖排序）
-- `inspect --resume-id <简历ID> --job-id <职位ID> --hi` —— 直链 + 搜索池上下文 + 立即Hi聊（耗点数）
-- `talent-detail --resume-id <简历ID> [--job-id <职位ID>] [--hi]` —— 投递/聊天来源语义（--hi 免费「回复」）
-- 只带 resumeId 无操作按钮（纯查看）；`--hi` 必须配 `--job-id` 否则报错
+- `inspect --resume-id <简历ID> --job-id <职位ID> --hi` —— 搜索池直链 + 「立即Hi聊」（耗点数）
+- `talent-detail --resume-id <简历ID> [--job-id <职位ID>] [--hi]` —— 投递/聊天来源直链 + 免费「回复」（只打开沟通面板）
+- 只带 `--resume-id` 是纯查看；使用 `--hi` 时必须配 `--job-id`，否则不会执行操作
 - 已 Hi 过的候选人按钮变「继续聊」，`--hi` 无效（编排时先查台账 Hi 状态）
 - 台账：`~/.51job-cli/ledger/`（0700，含 resumeId），评估过的候选人都应落账备查
 

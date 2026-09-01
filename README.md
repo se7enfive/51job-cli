@@ -62,15 +62,40 @@ cp .env.example ~/.51job-cli/.env
 | `positions [--candidates <职位名>]` | **职位管理页**在招职位目录；`--candidates` 拉取该职位候选人，`--source <auto\|delivery\|search>` 控制来源（auto=按有无投递分派 / delivery=仅投递 / search=人才池搜索扩充），`--scope <my\|org>` 切视图。 |
 | `jd <名称> [--cat]` | 抓取职位 JD 长文缓存到 `~/.51job-cli/jd/`，`--cat` 直出正文。 |
 
+### 候选人来源选择（AI/脚本必须先判断）
+
+```text
+已投递 / 已聊天 / 已在人才管理列表 → talent-detail
+主动人才搜索池 / search 返回的 hits → inspect
+人才望远镜推荐池                 → recommend --inspect
+```
+
+不要混用 `inspect` 和 `talent-detail`：两者访问的是不同候选人来源。`talent-detail --hi` 是免费「回复」（只打开聊天面板）；`inspect --hi` 是搜索池「立即Hi聊」（消耗点数）。两者都不会替你发送普通文字，发送文字需先打开会话再运行 `chat` + `send`。
+
+最小调用示例：
+
+```bash
+# 已投递候选人：查看简历
+51job talent-detail 张三 --strict --json
+
+# 搜索池候选人：先搜索，再查看详情
+51job search "测绘工程师" --json
+51job inspect 张三 --json
+
+# 已知稳定简历 ID：优先使用直链
+51job talent-detail --resume-id <简历ID> --json
+51job inspect --resume-id <简历ID> --json
+```
+
 ### 执行管线（原子级会话动作）
 | 命令 | 描述 |
 |---|---|
-| `inspect <姓名> [--job <岗位>] [--index <序号>] [--hi]` | **搜索池**候选人简历详情（只读不耗点数）；`--hi` 提取后调「立即Hi聊」（耗点数）。**`--resume-id <简历ID> [--job-id <职位ID>]` 可直链打开任意候选人详情**（持久键，不依赖搜索排序，推荐用于已落台账候选人）。 |
-| `talent-detail <姓名> [--strict] [--hi]` | **投递/聊天来源**候选人详情（非搜索池，定位方式为人才管理行）；`--hi` 走免费「回复」动作。同样支持 `--resume-id` 直链。 |
+| `inspect <姓名> [--job <岗位>] [--index <序号>] [--hi]` | **仅用于主动人才搜索池**：查看搜索结果中的候选人简历（只读不耗点数）。不要用它查已投递/已聊天候选人；后者用 `talent-detail`。`--hi` 执行搜索池「立即Hi聊」（消耗点数，不是普通文字回复）。支持 `--resume-id <简历ID> [--job-id <职位ID>]` 直链；直链 `--hi` 必须带 `--job-id`。 |
+| `talent-detail <姓名> [--strict] [--hi]` | **仅用于已投递、已聊天或已在人才管理列表中的候选人**：从人才管理页查看结构化简历。不要用它查主动搜索池候选人；后者用 `inspect`。`--hi` 只点击免费「回复」打开沟通面板，不发送普通文字，也不是搜索池「立即Hi聊」。支持 `--resume-id` 直链；直链 `--hi` 需同时带 `--job-id`。 |
 | `preview <姓名>` | 在线简历截图存档到 `~/.51job-cli/ocr/`（每日次数有限；`51JOB_RESUME_OCR=1` 才上传云端 OCR，opt-in）。 |
-| `greet [姓名] [--job <岗位>] [--by-index <序号>] [--dry-run] [--no-confirm]` | **Hi聊**一站式：搜索筛选 → 定位 → 详情摘要 → 人机确认 → 发出。写操作耗点数；`--dry-run` 只看不发。成功 0 / 点数不足或失败 1。 |
-| `chat [姓名] [--index <序号>] [--unread] [--strict]` | 打开候选人的聊天会话（会话窗口，供后续 send/action 用）。不发送消息。 |
-| `send --text <文案>` | 向【已打开的 chat 会话】发送一条文本（防重防抖，一次一遍）。 |
+| `greet [姓名] [--job <岗位>] [--by-index <序号>] [--dry-run] [--no-confirm]` | **搜索池候选人的 Hi聊一站式命令**：搜索筛选 → 定位 → 详情摘要 → 人机确认 → 发出。写操作耗点数；`--dry-run` 只看不发。已投递/已聊天候选人不要用 `greet`，请用 `talent-detail` + `chat`/`send`。成功 0 / 点数不足或失败 1。 |
+| `chat [姓名] [--index <序号>] [--unread] [--strict]` | 打开已投递/聊天候选人的聊天会话（供后续 `send`/`action` 使用），不发送消息。不要把 `search` 结果序号直接当作 `chat --index`；`chat --index` 只认 `list` 输出的序号。 |
+| `send --text <文案>` | 向当前已打开的聊天会话发送一条普通文字；必须先 `chat`，一次只发送一遍，不自动重试。 |
 | `action <操作> [--no-confirm]` | 会话业务动作：`resume`(索要简历)/`unsuitable`(不合适)/`note`(备注)/`wechat`(换微信)/`phone`(换电话)/`interview`(约面试)。写操作默认人机确认。 |
 
 ---
